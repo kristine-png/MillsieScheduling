@@ -60,61 +60,6 @@ export const taskTemplates = [
     unitName: 'buckets',
     isBatchProcess: false,
   },
-  {
-    id: 'task-beets',
-    groupId: 'veg-prep',
-    name: 'Roasting Beets',
-    colorVar: '--veg',
-    baseMinutes: 0,
-    variableMinutesPerCycle: 20, // 240 mins / 12 bags
-    unitsPerCycle: 1,
-    unitName: 'bags',
-    isBatchProcess: false,
-  },
-  {
-    id: 'task-cucumber',
-    groupId: 'veg-prep',
-    name: 'Cucumber Prep',
-    colorVar: '--veg',
-    baseMinutes: 0,
-    variableMinutesPerCycle: 15, // 90 mins / 6 cases
-    unitsPerCycle: 1,
-    unitName: 'cases',
-    isBatchProcess: false,
-  },
-  {
-    id: 'task-jalapeno',
-    groupId: 'veg-prep',
-    name: 'Jalapeno Prep',
-    colorVar: '--veg',
-    baseMinutes: 0,
-    variableMinutesPerCycle: 30, // 30 mins / 1 case
-    unitsPerCycle: 1,
-    unitName: 'cases',
-    isBatchProcess: false,
-  },
-  {
-    id: 'task-basil',
-    groupId: 'veg-prep',
-    name: 'Basil Prep',
-    colorVar: '--veg',
-    baseMinutes: 0,
-    variableMinutesPerCycle: 15, // 15 mins / 1 bag
-    unitsPerCycle: 1,
-    unitName: 'bags',
-    isBatchProcess: false,
-  },
-  {
-    id: 'task-cilantro',
-    groupId: 'veg-prep',
-    name: 'Cilantro Prep',
-    colorVar: '--veg',
-    baseMinutes: 0,
-    variableMinutesPerCycle: 22.5, // 90 mins / 4 cases
-    unitsPerCycle: 1,
-    unitName: 'cases',
-    isBatchProcess: false,
-  }
 ];
 
 export const runTemplates = [
@@ -132,20 +77,6 @@ export const runTemplates = [
       'task-mixing',
       'task-cleanup'
     ]
-  },
-  {
-    id: 'run-veggie-prep',
-    name: 'Veggie Prep Run',
-    groupId: 'veg-prep',
-    inputType: 'multiple',
-    tasks: [
-      'task-beets',
-      'task-cucumber',
-      'task-jalapeno',
-      'task-basil',
-      'task-cilantro'
-    ]
-  }
 ];
 
 export const daysOfWeek = [
