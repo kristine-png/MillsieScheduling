@@ -706,6 +706,7 @@ export default function App() {
             employees={employees} 
             setEmployees={setEmployees} 
             taskTemplates={taskTemplates} 
+            runTemplates={runTemplates}
           />
         )}
 
