@@ -50,20 +50,9 @@ export const taskTemplates = [
     isBatchProcess: true,
   },
   {
-    id: 'task-moving',
-    groupId: 'ferment-prep',
-    name: 'Move to Ferment Room',
-    colorVar: '--ferment',
-    baseMinutes: 10,
-    variableMinutesPerCycle: 0,
-    unitsPerCycle: 1,
-    unitName: 'buckets',
-    isBatchProcess: false,
-  },
-  {
     id: 'task-cleanup',
     groupId: 'ferment-prep',
-    name: 'Ferment Cleanup',
+    name: 'Fermentation Cleanup',
     colorVar: '--ferment',
     baseMinutes: 120,
     variableMinutesPerCycle: 0,
@@ -141,7 +130,6 @@ export const runTemplates = [
       'task-stickering',
       'task-boiling',
       'task-mixing',
-      'task-moving',
       'task-cleanup'
     ]
   },
