@@ -223,11 +223,13 @@ export default function App() {
   
   const [isNewRunModalOpen, setIsNewRunModalOpen] = useState(false);
   const [selectedRunTemplate, setSelectedRunTemplate] = useState(runTemplates[0].id);
-  const [runInputAmount, setRunInputAmount] = useState(1);
+  const [runInputAmount, setRunInputAmount] = useState('1');
+  const [runMultiInputAmount, setRunMultiInputAmount] = useState({});
 
   const [isEditRunModalOpen, setIsEditRunModalOpen] = useState(false);
   const [editingRunId, setEditingRunId] = useState(null);
   const [editRunInputAmount, setEditRunInputAmount] = useState('');
+  const [editRunMultiInputAmount, setEditRunMultiInputAmount] = useState({});
 
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [assigningTask, setAssigningTask] = useState(null);
@@ -308,37 +310,76 @@ export default function App() {
     const runTemplate = runTemplates.find(rt => rt.id === selectedRunTemplate);
     if (!runTemplate) return;
 
-    const parsedInputAmount = Number(runInputAmount) || 1;
-    const totalBuckets = parsedInputAmount * runTemplate.bucketsPerInputUnit;
     const runId = uuidv4();
+    let generatedTasks = [];
+    let parsedInputAmount = 1;
+    let totalBuckets = 0;
+    let runName = runTemplate.name;
+    let inputAmountObj = null;
 
-    const generatedTasks = runTemplate.tasks.map(taskId => {
-      const template = taskTemplates.find(t => t.id === taskId);
-      if (!template) return null;
+    if (runTemplate.inputType === 'multiple') {
+      inputAmountObj = {};
+      generatedTasks = runTemplate.tasks.map(taskId => {
+        const template = taskTemplates.find(t => t.id === taskId);
+        if (!template) return null;
+        
+        const taskInput = Number(runMultiInputAmount[taskId]) || 1;
+        inputAmountObj[taskId] = taskInput;
+        
+        let duration = template.baseMinutes;
+        if (template.variableMinutesPerCycle > 0) {
+          const cycles = template.isBatchProcess 
+            ? Math.ceil(taskInput / template.unitsPerCycle)
+            : (taskInput / template.unitsPerCycle);
+          duration += cycles * template.variableMinutesPerCycle;
+        }
 
-      let duration = template.baseMinutes;
-      if (template.variableMinutesPerCycle > 0) {
-        const cycles = template.isBatchProcess 
-          ? Math.ceil(totalBuckets / template.unitsPerCycle)
-          : (totalBuckets / template.unitsPerCycle);
-        duration += cycles * template.variableMinutesPerCycle;
-      }
+        return {
+          id: uuidv4(),
+          runId,
+          templateId: template.id,
+          groupId: template.groupId,
+          name: `${template.name} (${taskInput} ${template.unitName})`,
+          duration: Math.round(duration)
+        };
+      }).filter(Boolean);
+      
+      runName = `${runTemplate.name} (Mixed Amounts)`;
+    } else {
+      parsedInputAmount = Number(runInputAmount) || 1;
+      totalBuckets = parsedInputAmount * runTemplate.bucketsPerInputUnit;
+      
+      generatedTasks = runTemplate.tasks.map(taskId => {
+        const template = taskTemplates.find(t => t.id === taskId);
+        if (!template) return null;
 
-      return {
-        id: uuidv4(),
-        runId,
-        templateId: template.id,
-        groupId: template.groupId,
-        name: template.name,
-        duration: Math.round(duration)
-      };
-    }).filter(Boolean);
+        let duration = template.baseMinutes;
+        if (template.variableMinutesPerCycle > 0) {
+          const cycles = template.isBatchProcess 
+            ? Math.ceil(totalBuckets / template.unitsPerCycle)
+            : (totalBuckets / template.unitsPerCycle);
+          duration += cycles * template.variableMinutesPerCycle;
+        }
+
+        return {
+          id: uuidv4(),
+          runId,
+          templateId: template.id,
+          groupId: template.groupId,
+          name: template.name,
+          duration: Math.round(duration)
+        };
+      }).filter(Boolean);
+      
+      runName = `${runTemplate.name} (${parsedInputAmount} ${runTemplate.inputUnit})`;
+    }
 
     const newRun = {
       id: runId,
       templateId: runTemplate.id,
-      inputAmount: parsedInputAmount,
-      name: `${runTemplate.name} (${parsedInputAmount} ${runTemplate.inputUnit})`,
+      inputAmount: runTemplate.inputType === 'multiple' ? null : parsedInputAmount,
+      multiInputAmount: inputAmountObj,
+      name: runName,
       groupId: runTemplate.groupId,
       buckets: totalBuckets,
       generatedTasks
@@ -346,7 +387,8 @@ export default function App() {
 
     setActiveRuns([...activeRuns, newRun]);
     setIsNewRunModalOpen(false);
-    setRunInputAmount(1);
+    setRunInputAmount('1');
+    setRunMultiInputAmount({});
   };
 
   const handleEditRunSubmit = (e) => {
@@ -357,47 +399,103 @@ export default function App() {
     const runTemplate = runTemplates.find(rt => rt.id === runToEdit.templateId);
     if (!runTemplate) return;
 
-    const parsedInputAmount = Number(editRunInputAmount) || 1;
-    const totalBuckets = parsedInputAmount * runTemplate.bucketsPerInputUnit;
+    let parsedInputAmount = 1;
+    let totalBuckets = 0;
+    let runName = runTemplate.name;
+    let inputAmountObj = null;
 
-    const getNewDuration = (taskId) => {
-      const template = taskTemplates.find(t => t.id === taskId);
-      if (!template) return 0;
-      let duration = template.baseMinutes;
-      if (template.variableMinutesPerCycle > 0) {
-        const cycles = template.isBatchProcess 
-          ? Math.ceil(totalBuckets / template.unitsPerCycle)
-          : (totalBuckets / template.unitsPerCycle);
-        duration += cycles * template.variableMinutesPerCycle;
-      }
-      return Math.round(duration);
-    };
+    if (runTemplate.inputType === 'multiple') {
+      inputAmountObj = {};
+      
+      const getNewDurationAndName = (taskId) => {
+        const template = taskTemplates.find(t => t.id === taskId);
+        if (!template) return { duration: 0, name: '' };
+        
+        const taskInput = Number(editRunMultiInputAmount[taskId]) || 1;
+        inputAmountObj[taskId] = taskInput;
+        
+        let duration = template.baseMinutes;
+        if (template.variableMinutesPerCycle > 0) {
+          const cycles = template.isBatchProcess 
+            ? Math.ceil(taskInput / template.unitsPerCycle)
+            : (taskInput / template.unitsPerCycle);
+          duration += cycles * template.variableMinutesPerCycle;
+        }
+        return { 
+          duration: Math.round(duration), 
+          name: `${template.name} (${taskInput} ${template.unitName})`
+        };
+      };
 
-    setActiveRuns(prev => prev.map(run => {
-      if (run.id === editingRunId) {
-        return {
-          ...run,
-          name: `${runTemplate.name} (${parsedInputAmount} ${runTemplate.inputUnit})`,
-          buckets: totalBuckets,
-          inputAmount: parsedInputAmount,
-          generatedTasks: run.generatedTasks.map(t => ({
+      runName = `${runTemplate.name} (Mixed Amounts)`;
+
+      setActiveRuns(prev => prev.map(run => {
+        if (run.id === editingRunId) {
+          return {
+            ...run,
+            name: runName,
+            multiInputAmount: inputAmountObj,
+            generatedTasks: run.generatedTasks.map(t => {
+              const { duration, name } = getNewDurationAndName(t.templateId);
+              return { ...t, duration, name };
+            })
+          };
+        }
+        return run;
+      }));
+
+      setScheduledTasks(prev => prev.map(t => {
+        if (t.runId === editingRunId) {
+          const { duration, name } = getNewDurationAndName(t.templateId);
+          return { ...t, duration, name };
+        }
+        return t;
+      }));
+
+    } else {
+      parsedInputAmount = Number(editRunInputAmount) || 1;
+      totalBuckets = parsedInputAmount * runTemplate.bucketsPerInputUnit;
+      runName = `${runTemplate.name} (${parsedInputAmount} ${runTemplate.inputUnit})`;
+
+      const getNewDuration = (taskId) => {
+        const template = taskTemplates.find(t => t.id === taskId);
+        if (!template) return 0;
+        let duration = template.baseMinutes;
+        if (template.variableMinutesPerCycle > 0) {
+          const cycles = template.isBatchProcess 
+            ? Math.ceil(totalBuckets / template.unitsPerCycle)
+            : (totalBuckets / template.unitsPerCycle);
+          duration += cycles * template.variableMinutesPerCycle;
+        }
+        return Math.round(duration);
+      };
+
+      setActiveRuns(prev => prev.map(run => {
+        if (run.id === editingRunId) {
+          return {
+            ...run,
+            name: runName,
+            buckets: totalBuckets,
+            inputAmount: parsedInputAmount,
+            generatedTasks: run.generatedTasks.map(t => ({
+              ...t,
+              duration: getNewDuration(t.templateId)
+            }))
+          };
+        }
+        return run;
+      }));
+
+      setScheduledTasks(prev => prev.map(t => {
+        if (t.runId === editingRunId) {
+          return {
             ...t,
             duration: getNewDuration(t.templateId)
-          }))
-        };
-      }
-      return run;
-    }));
-
-    setScheduledTasks(prev => prev.map(t => {
-      if (t.runId === editingRunId) {
-        return {
-          ...t,
-          duration: getNewDuration(t.templateId)
-        };
-      }
-      return t;
-    }));
+          };
+        }
+        return t;
+      }));
+    }
 
     setIsEditRunModalOpen(false);
     setEditingRunId(null);
@@ -483,6 +581,7 @@ export default function App() {
                           e.stopPropagation();
                           setEditingRunId(run.id);
                           setEditRunInputAmount(run.inputAmount || '');
+                          setEditRunMultiInputAmount(run.multiInputAmount || {});
                           setIsEditRunModalOpen(true);
                         }}
                       >
@@ -614,25 +713,52 @@ export default function App() {
               <form onSubmit={handleAddRun}>
                 <div className="form-group">
                   <label>Production Group</label>
-                  <select value={selectedRunTemplate} onChange={e => setSelectedRunTemplate(e.target.value)}>
+                  <select value={selectedRunTemplate} onChange={e => {
+                    setSelectedRunTemplate(e.target.value);
+                    const tmpl = runTemplates.find(rt => rt.id === e.target.value);
+                    if (tmpl && tmpl.inputType === 'multiple') {
+                      const initialMulti = {};
+                      tmpl.tasks.forEach(tId => initialMulti[tId] = '1');
+                      setRunMultiInputAmount(initialMulti);
+                    }
+                  }}>
                     {runTemplates.map(rt => (
                       <option key={rt.id} value={rt.id}>{rt.name}</option>
                     ))}
                   </select>
                 </div>
-                <div className="form-group">
-                  <label>Yield Amount ({runTemplates.find(rt => rt.id === selectedRunTemplate)?.inputUnit})</label>
-                  <input 
-                    type="number" 
-                    min="1" 
-                    value={runInputAmount} 
-                    onChange={e => setRunInputAmount(e.target.value)}
-                    required
-                  />
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                    This equals {(Number(runInputAmount) || 0) * (runTemplates.find(rt => rt.id === selectedRunTemplate)?.bucketsPerInputUnit || 1)} buckets.
-                  </p>
-                </div>
+                {runTemplates.find(rt => rt.id === selectedRunTemplate)?.inputType === 'multiple' ? (
+                  runTemplates.find(rt => rt.id === selectedRunTemplate).tasks.map(taskId => {
+                    const task = taskTemplates.find(t => t.id === taskId);
+                    return (
+                      <div key={taskId} className="form-group" style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                        <label style={{ margin: 0, width: '150px' }}>{task.name} ({task.unitName})</label>
+                        <input 
+                          type="number" 
+                          min="1" 
+                          value={runMultiInputAmount[taskId] || '1'} 
+                          onChange={e => setRunMultiInputAmount(prev => ({ ...prev, [taskId]: e.target.value }))}
+                          required
+                          style={{ flex: 1 }}
+                        />
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="form-group">
+                    <label>Yield Amount ({runTemplates.find(rt => rt.id === selectedRunTemplate)?.inputUnit})</label>
+                    <input 
+                      type="number" 
+                      min="1" 
+                      value={runInputAmount} 
+                      onChange={e => setRunInputAmount(e.target.value)}
+                      required
+                    />
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                      This equals {(Number(runInputAmount) || 0) * (runTemplates.find(rt => rt.id === selectedRunTemplate)?.bucketsPerInputUnit || 1)} buckets.
+                    </p>
+                  </div>
+                )}
                 <div className="modal-actions">
                   <button type="button" className="btn btn-secondary" onClick={() => setIsNewRunModalOpen(false)}>Cancel</button>
                   <button type="submit" className="btn btn-primary">Create Run</button>
@@ -647,22 +773,41 @@ export default function App() {
             <div className="modal-content">
               <h3>Edit Yield Amount</h3>
               <form onSubmit={handleEditRunSubmit}>
-                <div className="form-group">
-                  <label>
-                    New Yield Amount 
-                    ({runTemplates.find(rt => rt.id === activeRuns.find(r => r.id === editingRunId)?.templateId)?.inputUnit})
-                  </label>
-                  <input 
-                    type="number" 
-                    min="1" 
-                    value={editRunInputAmount} 
-                    onChange={e => setEditRunInputAmount(e.target.value)}
-                    required
-                  />
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                    This equals {(Number(editRunInputAmount) || 0) * (runTemplates.find(rt => rt.id === activeRuns.find(r => r.id === editingRunId)?.templateId)?.bucketsPerInputUnit || 1)} buckets.
-                  </p>
-                </div>
+                {runTemplates.find(rt => rt.id === activeRuns.find(r => r.id === editingRunId)?.templateId)?.inputType === 'multiple' ? (
+                  runTemplates.find(rt => rt.id === activeRuns.find(r => r.id === editingRunId)?.templateId).tasks.map(taskId => {
+                    const task = taskTemplates.find(t => t.id === taskId);
+                    return (
+                      <div key={taskId} className="form-group" style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                        <label style={{ margin: 0, width: '150px' }}>{task.name} ({task.unitName})</label>
+                        <input 
+                          type="number" 
+                          min="1" 
+                          value={editRunMultiInputAmount[taskId] || '1'} 
+                          onChange={e => setEditRunMultiInputAmount(prev => ({ ...prev, [taskId]: e.target.value }))}
+                          required
+                          style={{ flex: 1 }}
+                        />
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="form-group">
+                    <label>
+                      New Yield Amount 
+                      ({runTemplates.find(rt => rt.id === activeRuns.find(r => r.id === editingRunId)?.templateId)?.inputUnit})
+                    </label>
+                    <input 
+                      type="number" 
+                      min="1" 
+                      value={editRunInputAmount} 
+                      onChange={e => setEditRunInputAmount(e.target.value)}
+                      required
+                    />
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                      This equals {(Number(editRunInputAmount) || 0) * (runTemplates.find(rt => rt.id === activeRuns.find(r => r.id === editingRunId)?.templateId)?.bucketsPerInputUnit || 1)} buckets.
+                    </p>
+                  </div>
+                )}
                 <div className="modal-actions">
                   <button type="button" className="btn btn-secondary" onClick={() => setIsEditRunModalOpen(false)}>Cancel</button>
                   <button type="submit" className="btn btn-primary">Update Run</button>

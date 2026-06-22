@@ -66,9 +66,9 @@ export const taskTemplates = [
     name: 'Roasting Beets',
     colorVar: '--veg',
     baseMinutes: 0,
-    variableMinutesPerCycle: 60,
+    variableMinutesPerCycle: 20, // 240 mins / 12 bags
     unitsPerCycle: 1,
-    unitName: 'batches',
+    unitName: 'bags',
     isBatchProcess: false,
   },
   {
@@ -77,9 +77,9 @@ export const taskTemplates = [
     name: 'Cucumber Prep',
     colorVar: '--veg',
     baseMinutes: 0,
-    variableMinutesPerCycle: 45,
+    variableMinutesPerCycle: 15, // 90 mins / 6 cases
     unitsPerCycle: 1,
-    unitName: 'batches',
+    unitName: 'cases',
     isBatchProcess: false,
   },
   {
@@ -88,9 +88,9 @@ export const taskTemplates = [
     name: 'Jalapeno Prep',
     colorVar: '--veg',
     baseMinutes: 0,
-    variableMinutesPerCycle: 30,
+    variableMinutesPerCycle: 30, // 30 mins / 1 case
     unitsPerCycle: 1,
-    unitName: 'batches',
+    unitName: 'cases',
     isBatchProcess: false,
   },
   {
@@ -99,9 +99,9 @@ export const taskTemplates = [
     name: 'Basil Prep',
     colorVar: '--veg',
     baseMinutes: 0,
-    variableMinutesPerCycle: 30,
+    variableMinutesPerCycle: 15, // 15 mins / 1 bag
     unitsPerCycle: 1,
-    unitName: 'batches',
+    unitName: 'bags',
     isBatchProcess: false,
   },
   {
@@ -110,9 +110,9 @@ export const taskTemplates = [
     name: 'Cilantro Prep',
     colorVar: '--veg',
     baseMinutes: 0,
-    variableMinutesPerCycle: 30,
+    variableMinutesPerCycle: 22.5, // 90 mins / 4 cases
     unitsPerCycle: 1,
-    unitName: 'batches',
+    unitName: 'cases',
     isBatchProcess: false,
   }
 ];
@@ -122,6 +122,7 @@ export const runTemplates = [
     id: 'run-fermentation',
     name: 'Fermentation Run',
     groupId: 'ferment-prep',
+    inputType: 'single',
     inputUnit: 'cases',
     bucketsPerInputUnit: 3,
     tasks: [
@@ -136,8 +137,7 @@ export const runTemplates = [
     id: 'run-veggie-prep',
     name: 'Veggie Prep Run',
     groupId: 'veg-prep',
-    inputUnit: 'batches',
-    bucketsPerInputUnit: 1,
+    inputType: 'multiple',
     tasks: [
       'task-beets',
       'task-cucumber',
