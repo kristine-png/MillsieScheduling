@@ -264,8 +264,12 @@ export default function App() {
       const clampedY = Math.max(0, Math.min(dropY, 11 * 80 - 20)); // Don't drop perfectly at the bottom edge
       
       const totalMinutes = (clampedY / 80) * 60;
-      const startHour = 7 + Math.floor(totalMinutes / 60);
-      const startMinute = Math.round((totalMinutes % 60) / 5) * 5;
+      let startHour = 7 + Math.floor(totalMinutes / 60);
+      let startMinute = Math.round((totalMinutes % 60) / 5) * 5;
+      if (startMinute >= 60) {
+        startHour += 1;
+        startMinute -= 60;
+      }
 
       if (active.data.current?.type === 'generated') {
         const generatedTask = active.data.current.task;
