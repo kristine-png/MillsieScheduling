@@ -4,6 +4,7 @@ import { initialEmployees, taskTemplates, runTemplates, hoursOfDay } from './dat
 import { Clock, GripVertical, AlertCircle, Users, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Plus, Trash2, Edit2 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { format, addWeeks, subWeeks, startOfWeek, addDays, getWeek } from 'date-fns';
+import TeamManagement from './TeamManagement';
 import './App.css';
 
 // Draggable Sidebar Item (Pre-calculated Generated Task)
@@ -199,7 +200,8 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
 }
 
 export default function App() {
-  const [employees] = useState(initialEmployees);
+  const [employees, setEmployees] = useState(initialEmployees);
+  const [currentView, setCurrentView] = useState('schedule');
   const [activeRuns, setActiveRuns] = useState([]);
   const [scheduledTasks, setScheduledTasks] = useState([]);
   
@@ -547,104 +549,99 @@ export default function App() {
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} collisionDetection={pointerWithin}>
       <div className="app-layout">
         <div className="sidebar-panel">
-          <div className="sidebar-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="sidebar-header" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div>
-              <h2>Millsie Scheduling</h2>
-              <p>Active Production Runs</p>
+              <h2 style={{ fontSize: '1.25rem', marginBottom: '0.25rem' }}>Millsie Scheduling</h2>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Production Control</p>
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button 
+                className={`btn ${currentView === 'schedule' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ flex: 1, padding: '0.5rem', fontSize: '0.875rem' }}
+                onClick={() => setCurrentView('schedule')}
+              >
+                Schedule
+              </button>
+              <button 
+                className={`btn ${currentView === 'team' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ flex: 1, padding: '0.5rem', fontSize: '0.875rem' }}
+                onClick={() => setCurrentView('team')}
+              >
+                Team
+              </button>
             </div>
           </div>
           
-          <div className="sidebar-content" style={{ padding: '1rem' }}>
-            <button className="btn btn-primary" style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem' }} onClick={() => setIsNewRunModalOpen(true)}>
-              <Plus size={16} /> New Production Run
-            </button>
+          {currentView === 'schedule' && (
+            <div className="sidebar-content" style={{ padding: '1rem' }}>
+              <div className="section-title">Active Runs</div>
+              <button className="btn btn-primary" style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem' }} onClick={() => setIsNewRunModalOpen(true)}>
+                <Plus size={16} /> New Production Run
+              </button>
 
-            <div style={{ marginTop: '2rem' }}>
-              {activeRuns.length === 0 && (
-                <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem', textAlign: 'center', padding: '2rem 0' }}>
-                  No active runs. Add one above.
-                </div>
-              )}
-              {activeRuns.map(run => (
-                <div key={run.id} className="task-group">
-                  <div className="task-group-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                      <ChevronDown size={16} />
-                      <span>{run.name}</span>
-                    </div>
-                    <div style={{ display: 'flex', gap: '4px' }}>
-                      <button 
-                        className="btn btn-icon" 
-                        style={{ padding: '2px', color: 'var(--text-muted)' }}
-                        title="Edit Yield Amount"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEditingRunId(run.id);
-                          setEditRunInputAmount(run.inputAmount || '');
-                          setEditRunMultiInputAmount(run.multiInputAmount || {});
-                          setIsEditRunModalOpen(true);
-                        }}
-                      >
-                        <Edit2 size={14} />
-                      </button>
-                      <button 
-                        className="btn btn-icon" 
-                        style={{ padding: '2px', color: 'var(--text-muted)' }}
-                        title="Delete Production Run"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (window.confirm(`Are you sure you want to delete ${run.name}? This will also remove any of its tasks from the schedule.`)) {
-                            setActiveRuns(prev => prev.filter(r => r.id !== run.id));
-                            setScheduledTasks(prev => prev.filter(t => t.runId !== run.id));
-                          }
-                        }}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
+              <div style={{ marginTop: '2rem' }}>
+                {activeRuns.length === 0 && (
+                  <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem', textAlign: 'center', padding: '2rem 0' }}>
+                    No active runs. Add one above.
                   </div>
-                  {run.generatedTasks.length === 0 ? (
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', paddingLeft: '1.5rem' }}>All tasks scheduled!</div>
-                  ) : (
-                    <div className="task-group-list">
-                      {run.generatedTasks.map(task => (
-                        <DraggableGeneratedTask key={task.id} task={task} />
-                      ))}
+                )}
+                {activeRuns.map(run => (
+                  <div key={run.id} className="task-group">
+                    <div className="task-group-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                        <ChevronDown size={16} />
+                        <span>{run.name}</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        <button 
+                          className="btn btn-icon" 
+                          style={{ padding: '2px', color: 'var(--text-muted)' }}
+                          title="Edit Yield Amount"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingRunId(run.id);
+                            setEditRunInputAmount(run.inputAmount || '');
+                            setEditRunMultiInputAmount(run.multiInputAmount || {});
+                            setIsEditRunModalOpen(true);
+                          }}
+                        >
+                          <Edit2 size={14} />
+                        </button>
+                        <button 
+                          className="btn btn-icon" 
+                          style={{ padding: '2px', color: 'var(--text-muted)' }}
+                          title="Delete Production Run"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (window.confirm(`Are you sure you want to delete ${run.name}? This will also remove any of its tasks from the schedule.`)) {
+                              setActiveRuns(prev => prev.filter(r => r.id !== run.id));
+                              setScheduledTasks(prev => prev.filter(t => t.runId !== run.id));
+                            }
+                          }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </div>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <div style={{ marginTop: '2rem' }}>
-              <div className="section-title">Team</div>
-              {employees.map(emp => {
-                const expertSkills = Object.entries(emp.skills)
-                  .filter(([_, level]) => level === 'expert')
-                  .map(([taskId, _]) => {
-                    const task = taskTemplates.find(t => t.id === taskId);
-                    return task ? task.name : taskId;
-                  });
-
-                return (
-                  <div key={emp.id} className="employee-card" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.25rem' }}>
-                    <span style={{ fontWeight: 600, fontSize: '0.875rem' }}>{emp.name}</span>
-                    {expertSkills.length > 0 ? (
-                      <span style={{ fontSize: '0.75rem', color: 'var(--success)' }}>
-                        Expert: {expertSkills.join(', ')}
-                      </span>
+                    {run.generatedTasks.length === 0 ? (
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', paddingLeft: '1.5rem' }}>All tasks scheduled!</div>
                     ) : (
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>No expert skills</span>
+                      <div className="task-group-list">
+                        {run.generatedTasks.map(task => (
+                          <DraggableGeneratedTask key={task.id} task={task} />
+                        ))}
+                      </div>
                     )}
                   </div>
-                );
-              })}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
-        <div className="schedule-main">
-          <div className="schedule-header">
+        {currentView === 'schedule' ? (
+          <div className="schedule-main">
+            <div className="schedule-header">
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}>
               <CalendarDays size={20} color="var(--primary)" />
               Week {currentWeekNumber} ({weekStartStr} - {weekEndStr})
@@ -704,6 +701,13 @@ export default function App() {
             </div>
           </div>
         </div>
+        ) : (
+          <TeamManagement 
+            employees={employees} 
+            setEmployees={setEmployees} 
+            taskTemplates={taskTemplates} 
+          />
+        )}
 
         {/* Modals */}
         {isNewRunModalOpen && (
