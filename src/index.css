@@ -1,0 +1,117 @@
+:root {
+  /* Colors */
+  --bg-base: #f4f6fb;
+  --bg-surface: #ffffff;
+  --text-main: #1a1e2b;
+  --text-muted: #64748b;
+  --border-color: #e2e8f0;
+  
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+
+  /* Ferment Prep Theme Colors */
+  --ferment-bg: #e0e7ff;
+  --ferment-border: #a5b4fc;
+  --ferment-text: #3730a3;
+  --ferment-solid: #6366f1;
+
+  /* Other Task Themes (for later) */
+  --dip-bg: #fce7f3;
+  --dip-border: #f9a8d4;
+  --dip-text: #9d174d;
+
+  --veg-bg: #dcfce7;
+  --veg-border: #86efac;
+  --veg-text: #166534;
+
+  /* Shadow & Radii */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-full: 9999px;
+
+  /* Typography */
+  --font-heading: 'Outfit', sans-serif;
+  --font-body: 'Inter', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--bg-base);
+  color: var(--text-main);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+}
+
+/* Layout utilities */
+.app-container {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 320px;
+  background-color: var(--bg-surface);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-sm);
+  z-index: 10;
+}
+
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.topbar {
+  height: 64px;
+  background-color: var(--bg-surface);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  padding: 0 1.5rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.schedule-container {
+  flex: 1;
+  overflow: auto;
+  padding: 1.5rem;
+  background-color: var(--bg-base);
+}
+
+/* Base Card Styles */
+.card {
+  background: var(--bg-surface);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-color);
+}
