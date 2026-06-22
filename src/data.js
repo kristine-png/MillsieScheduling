@@ -59,6 +59,61 @@ export const taskTemplates = [
     unitsPerCycle: 1,
     unitName: 'buckets',
     isBatchProcess: false,
+  },
+  {
+    id: 'task-beets',
+    groupId: 'veg-prep',
+    name: 'Roasting Beets',
+    colorVar: '--veg',
+    baseMinutes: 0,
+    variableMinutesPerCycle: 60,
+    unitsPerCycle: 1,
+    unitName: 'batches',
+    isBatchProcess: false,
+  },
+  {
+    id: 'task-cucumber',
+    groupId: 'veg-prep',
+    name: 'Cucumber Prep',
+    colorVar: '--veg',
+    baseMinutes: 0,
+    variableMinutesPerCycle: 45,
+    unitsPerCycle: 1,
+    unitName: 'batches',
+    isBatchProcess: false,
+  },
+  {
+    id: 'task-jalapeno',
+    groupId: 'veg-prep',
+    name: 'Jalapeno Prep',
+    colorVar: '--veg',
+    baseMinutes: 0,
+    variableMinutesPerCycle: 30,
+    unitsPerCycle: 1,
+    unitName: 'batches',
+    isBatchProcess: false,
+  },
+  {
+    id: 'task-basil',
+    groupId: 'veg-prep',
+    name: 'Basil Prep',
+    colorVar: '--veg',
+    baseMinutes: 0,
+    variableMinutesPerCycle: 30,
+    unitsPerCycle: 1,
+    unitName: 'batches',
+    isBatchProcess: false,
+  },
+  {
+    id: 'task-cilantro',
+    groupId: 'veg-prep',
+    name: 'Cilantro Prep',
+    colorVar: '--veg',
+    baseMinutes: 0,
+    variableMinutesPerCycle: 30,
+    unitsPerCycle: 1,
+    unitName: 'batches',
+    isBatchProcess: false,
   }
 ];
 
@@ -75,6 +130,20 @@ export const runTemplates = [
       'task-boiling',
       'task-mixing',
       'task-cleanup'
+    ]
+  },
+  {
+    id: 'run-veggie-prep',
+    name: 'Veggie Prep Run',
+    groupId: 'veg-prep',
+    inputUnit: 'batches',
+    bucketsPerInputUnit: 1,
+    tasks: [
+      'task-beets',
+      'task-cucumber',
+      'task-jalapeno',
+      'task-basil',
+      'task-cilantro'
     ]
   }
 ];
