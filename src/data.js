@@ -77,6 +77,7 @@ export const runTemplates = [
       'task-mixing',
       'task-cleanup'
     ]
+  }
 ];
 
 export const daysOfWeek = [
