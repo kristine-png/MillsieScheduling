@@ -1,11 +1,15 @@
 import { useState, useMemo } from 'react';
 import { DndContext, useDraggable, useDroppable, pointerWithin, useSensors, useSensor, PointerSensor, DragOverlay } from '@dnd-kit/core';
 import { initialEmployees, taskTemplates, runTemplates, hoursOfDay } from './data';
-import { Clock, GripVertical, AlertCircle, Users, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
+import { Clock, GripVertical, AlertCircle, Users, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Printer, Trash2 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { format, addWeeks, subWeeks, startOfWeek, addDays, getWeek } from 'date-fns';
 import TeamManagement from './TeamManagement';
 import './App.css';
+
+const HOUR_ROW_HEIGHT = 80;
+const SCHEDULE_HOURS = 11;
+const SNAP_MINUTES = 5;
 
 const defaultFermentationAssignments = {
   'task-sanitation': ['emp-2'],
@@ -60,15 +64,80 @@ function formatDuration(minutes) {
   return `${hours}h ${remainingMinutes}m`;
 }
 
+const singularUnits = {
+  bags: 'bag',
+  batches: 'batch',
+  bins: 'bin',
+  blocks: 'block',
+  boxes: 'box',
+  buckets: 'bucket',
+  cases: 'case',
+  changeovers: 'changeover',
+  containers: 'container',
+  inspections: 'inspection',
+  lids: 'lid',
+  pans: 'pan',
+  'prep sets': 'prep set',
+  racks: 'rack',
+  runs: 'run',
+};
+
+function getDisplayUnit(amount, unitName) {
+  return Number(amount) === 1 ? (singularUnits[unitName] || unitName) : unitName;
+}
+
+function formatAmountLabel(amount, unitName) {
+  return `${amount} ${getDisplayUnit(amount, unitName)}`;
+}
+
+function formatTime(hour, min = 0) {
+  const normalizedHour = hour % 24;
+  const h = normalizedHour > 12 ? normalizedHour - 12 : normalizedHour || 12;
+  const m = Math.round(min).toString().padStart(2, '0');
+  const ampm = normalizedHour >= 12 ? 'PM' : 'AM';
+  return `${h}:${m} ${ampm}`;
+}
+
+function getTaskTimeRange(task) {
+  const endTotalMins = (task.startHour * 60) + (task.startMinute || 0) + task.duration;
+  const endHour = Math.floor(endTotalMins / 60);
+  const endMin = endTotalMins % 60;
+  return `${formatTime(task.startHour, task.startMinute || 0)} - ${formatTime(endHour, endMin)}`;
+}
+
+function getDropTimeFromDrag(active, over) {
+  if (!active?.rect?.current?.translated || !over?.rect) return null;
+
+  const dropY = active.rect.current.translated.top - over.rect.top;
+  const maxY = SCHEDULE_HOURS * HOUR_ROW_HEIGHT - 20;
+  const clampedY = Math.max(0, Math.min(dropY, maxY));
+  const totalMinutes = (clampedY / HOUR_ROW_HEIGHT) * 60;
+  const snappedTotalMinutes = Math.round(totalMinutes / SNAP_MINUTES) * SNAP_MINUTES;
+  const startHour = 7 + Math.floor(snappedTotalMinutes / 60);
+  const startMinute = snappedTotalMinutes % 60;
+
+  return {
+    startHour,
+    startMinute,
+    top: (snappedTotalMinutes / 60) * HOUR_ROW_HEIGHT,
+  };
+}
+
 function getTaskAmountForRun(taskId, amount, flavorCount = 1) {
-  if (taskId === 'task-dip-line-changeover' || taskId === 'task-flavor-changeover') {
+  if (
+    taskId === 'task-dip-line-changeover'
+    || taskId === 'task-flavor-changeover'
+    || taskId === 'task-cheese-changeover'
+  ) {
     return Math.max(0, Number(flavorCount) - 1);
   }
   return amount;
 }
 
 function hasFlavorCountField(runTemplateId) {
-  return runTemplateId === 'run-dip-processing' || runTemplateId === 'run-dip-mixing';
+  return runTemplateId === 'run-dip-processing'
+    || runTemplateId === 'run-dip-mixing'
+    || runTemplateId === 'run-cheese-mixing';
 }
 
 function hasDefaultEmployeeField(runTemplateId) {
@@ -76,7 +145,7 @@ function hasDefaultEmployeeField(runTemplateId) {
 }
 
 function getRunDisplayName(runTemplate, inputAmount, inputUnit, fallbackName = 'Production Run') {
-  return `${runTemplate?.name || fallbackName} (${inputAmount} ${inputUnit})`;
+  return `${runTemplate?.name || fallbackName} (${formatAmountLabel(inputAmount, inputUnit)})`;
 }
 
 function addMinutesToStart(startHour, startMinute, minutesToAdd) {
@@ -184,7 +253,7 @@ function DraggableRunTemplate({
           <div className="task-title" style={{ fontSize: '0.875rem' }}>{runTemplate.name}</div>
           <div className="task-meta">
             <Clock size={12} />
-            {parsedAmount} {runTemplate.inputUnit}, {formatDuration(totalConfiguredMinutes)} total work
+            {formatAmountLabel(parsedAmount, runTemplate.inputUnit)}, {formatDuration(totalConfiguredMinutes)} total work
           </div>
         </div>
         <ChevronDown size={16} className={`run-expand-icon ${isExpanded ? 'is-expanded' : ''}`} />
@@ -193,7 +262,7 @@ function DraggableRunTemplate({
       {isExpanded && (
       <div className="run-setup-controls">
         <label className="compact-field">
-          <span>{runTemplate.inputUnit}</span>
+          <span>{getDisplayUnit(parsedAmount, runTemplate.inputUnit)}</span>
           <input
             type="number"
             min="1"
@@ -211,7 +280,7 @@ function DraggableRunTemplate({
               value={flavorCount}
               onChange={e => onFlavorCountChange(e.target.value)}
             />
-            <small>{changeovers} changeovers</small>
+            <small>{formatAmountLabel(changeovers, 'changeovers')}</small>
           </label>
         )}
 
@@ -304,13 +373,13 @@ function DraggableProcessTemplate({
           <div className="task-title" style={{ fontSize: '0.825rem' }}>{task.name}</div>
           <div className="task-meta">
             <Clock size={12} />
-            {parsedAmount} {task.unitName}, {formatDuration(duration)}
+            {formatAmountLabel(parsedAmount, task.unitName)}, {formatDuration(duration)}
           </div>
         </div>
       </div>
       <div className="process-setup-controls">
         <label className="compact-field process-amount-field">
-          <span>{task.unitName}</span>
+          <span>{getDisplayUnit(parsedAmount, task.unitName)}</span>
           <input
             type="number"
             min="1"
@@ -385,8 +454,18 @@ function ProcessFolder({
   );
 }
 
+function DropTimeHint({ hint }) {
+  if (!hint) return null;
+
+  return (
+    <div className="drop-time-hint" style={{ top: `${hint.top}px` }}>
+      <span>{formatTime(hint.startHour, hint.startMinute)}</span>
+    </div>
+  );
+}
+
 // Droppable Schedule Slot (Full Day)
-function DroppableDay({ dateStr, children }) {
+function DroppableDay({ dateStr, dragTimeHint, children }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `day-${dateStr}`,
     data: { dateStr },
@@ -405,6 +484,7 @@ function DroppableDay({ dateStr, children }) {
       {hoursOfDay.map(hour => (
         <div key={hour} className="hour-slot" style={{ pointerEvents: 'none' }} />
       ))}
+      <DropTimeHint hint={dragTimeHint?.dateStr === dateStr ? dragTimeHint : null} />
       {children}
     </div>
   );
@@ -479,6 +559,93 @@ function layoutDayTasks(tasks) {
   return results;
 }
 
+function PrintWeekSchedule({
+  weekDays,
+  currentWeekNumber,
+  weekStartStr,
+  weekEndStr,
+  scheduledTasks,
+  employees,
+  activeRuns,
+}) {
+  const getAssignedEmployeeNames = (task) => {
+    const employeeIds = task.employeeIds || (task.employeeId ? [task.employeeId] : []);
+    const names = employeeIds
+      .map(employeeId => employees.find(e => e.id === employeeId)?.name)
+      .filter(Boolean);
+    return names.length > 0 ? names.join(', ') : 'Unassigned';
+  };
+
+  const getRunName = (task) => {
+    const run = activeRuns.find(item => item.id === task.runId);
+    return run?.name || 'Single process';
+  };
+
+  const getSortedTasksForDay = (dayId) => scheduledTasks
+    .filter(task => task.dateStr === dayId)
+    .sort((a, b) => {
+      const startA = (a.startHour * 60) + (a.startMinute || 0);
+      const startB = (b.startHour * 60) + (b.startMinute || 0);
+      return startA - startB;
+    });
+
+  return (
+    <section className="print-week">
+      <header className="print-week-header">
+        <div>
+          <h1>Millsie Production Schedule</h1>
+          <p>Week {currentWeekNumber} - {weekStartStr} to {weekEndStr}</p>
+        </div>
+        <div className="print-generated">Printed {format(new Date(), 'MMM d, yyyy h:mm a')}</div>
+      </header>
+
+      <div className="print-day-list">
+        {weekDays.map(day => {
+          const dayTasks = getSortedTasksForDay(day.id);
+
+          return (
+            <section key={day.id} className="print-day">
+              <div className="print-day-title">
+                <h2>{day.name}</h2>
+                <span>{day.formattedDate}</span>
+              </div>
+
+              {dayTasks.length === 0 ? (
+                <div className="print-empty-day">No scheduled production.</div>
+              ) : (
+                <table className="print-task-table">
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Process</th>
+                      <th>Amount</th>
+                      <th>Work Time</th>
+                      <th>Employee</th>
+                      <th>Run</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dayTasks.map(task => (
+                      <tr key={task.id}>
+                        <td>{getTaskTimeRange(task)}</td>
+                        <td>{task.name}</td>
+                        <td>{task.inputAmount ? formatAmountLabel(task.inputAmount, task.inputUnit) : '-'}</td>
+                        <td>{formatDuration(task.duration)}</td>
+                        <td>{getAssignedEmployeeNames(task)}</td>
+                        <td>{getRunName(task)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </section>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 // Scheduled Task Block on Grid
 function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -498,17 +665,7 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
   const leftPercent = layout ? layout.left : 0;
   const widthPercent = layout ? layout.width : 100;
 
-  const formatTime = (hour, min) => {
-    const h = hour > 12 ? hour - 12 : hour;
-    const m = min.toString().padStart(2, '0');
-    const ampm = hour >= 12 ? 'PM' : 'AM';
-    return `${h}:${m} ${ampm}`;
-  };
-
-  const endTotalMins = (scheduledTask.startHour * 60) + (scheduledTask.startMinute || 0) + scheduledTask.duration;
-  const endHour = Math.floor(endTotalMins / 60);
-  const endMin = endTotalMins % 60;
-  const timeString = `${formatTime(scheduledTask.startHour, scheduledTask.startMinute || 0)} - ${formatTime(endHour, endMin)}`;
+  const timeString = getTaskTimeRange(scheduledTask);
 
   return (
     <div 
@@ -536,7 +693,7 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
     >
       <div className="task-title" style={{ fontSize: widthPercent < 50 ? '0.75rem' : '0.875rem' }}>{scheduledTask.name}</div>
       <div className="task-meta" style={{ marginBottom: '2px', fontSize: '0.7rem' }}>
-        {scheduledTask.inputAmount ? `${scheduledTask.inputAmount} ${scheduledTask.inputUnit} - ` : ''}{timeString} ({formatDuration(scheduledTask.duration)})
+        {scheduledTask.inputAmount ? `${formatAmountLabel(scheduledTask.inputAmount, scheduledTask.inputUnit)} - ` : ''}{timeString} ({formatDuration(scheduledTask.duration)})
       </div>
       {assignedEmployees.length > 0 ? (
         <div className="task-meta">
@@ -585,6 +742,7 @@ export default function App() {
   const [expandedRunId, setExpandedRunId] = useState(null);
 
   const [activeDragItem, setActiveDragItem] = useState(null);
+  const [dragTimeHint, setDragTimeHint] = useState(null);
 
   const handleRunSetupAmountChange = (runTemplateId, amount) => {
     setRunSetups(prev => ({
@@ -662,27 +820,41 @@ export default function App() {
 
   const handleDragStart = (event) => {
     setActiveDragItem(event.active);
+    setDragTimeHint(null);
+  };
+
+  const handleDragMove = (event) => {
+    const { active, over } = event;
+    if (!over?.id?.startsWith('day-')) {
+      setDragTimeHint(null);
+      return;
+    }
+
+    const dropTime = getDropTimeFromDrag(active, over);
+    if (!dropTime) {
+      setDragTimeHint(null);
+      return;
+    }
+
+    setDragTimeHint({
+      dateStr: over.data.current.dateStr,
+      ...dropTime,
+    });
   };
 
   const handleDragEnd = (event) => {
     setActiveDragItem(null);
+    setDragTimeHint(null);
     const { active, over } = event;
     if (!over) return;
 
     if (over.id.startsWith('day-')) {
       const { dateStr } = over.data.current;
 
-      // Calculate precision drop time based on Y offset
-      const dropY = active.rect.current.translated.top - over.rect.top;
-      const clampedY = Math.max(0, Math.min(dropY, 11 * 80 - 20)); // Don't drop perfectly at the bottom edge
-      
-      const totalMinutes = (clampedY / 80) * 60;
-      let startHour = 7 + Math.floor(totalMinutes / 60);
-      let startMinute = Math.round((totalMinutes % 60) / 5) * 5;
-      if (startMinute >= 60) {
-        startHour += 1;
-        startMinute -= 60;
-      }
+      // Calculate precision drop time based on Y offset.
+      const dropTime = getDropTimeFromDrag(active, over);
+      if (!dropTime) return;
+      const { startHour, startMinute } = dropTime;
 
       if (active.data.current?.type === 'run-template') {
         const runTemplate = active.data.current.runTemplate;
@@ -727,7 +899,7 @@ export default function App() {
           inputAmount,
           flavorCount,
           defaultEmployeeId,
-          name: `${runTemplate.name} (${inputAmount} ${runTemplate.inputUnit})`,
+          name: getRunDisplayName(runTemplate, inputAmount, runTemplate.inputUnit),
           groupId: runTemplate.groupId,
           inputUnit: runTemplate.inputUnit,
           buckets: inputAmount,
@@ -854,7 +1026,17 @@ export default function App() {
   };
 
   return (
-    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} collisionDetection={pointerWithin}>
+    <DndContext
+      sensors={sensors}
+      onDragStart={handleDragStart}
+      onDragMove={handleDragMove}
+      onDragEnd={handleDragEnd}
+      onDragCancel={() => {
+        setActiveDragItem(null);
+        setDragTimeHint(null);
+      }}
+      collisionDetection={pointerWithin}
+    >
       <div className="app-layout">
         <div className="sidebar-panel">
           <div className="sidebar-header" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -979,6 +1161,10 @@ export default function App() {
               <button className="btn btn-icon" onClick={() => setCurrentDate(addWeeks(currentDate, 1))}>
                 <ChevronRight size={16} />
               </button>
+              <button className="btn btn-secondary print-week-button" onClick={() => window.print()}>
+                <Printer size={16} />
+                Print Week
+              </button>
             </div>
           </div>
 
@@ -1003,7 +1189,7 @@ export default function App() {
               {/* Day Columns (Cols 2 to 6, spanning rows 2 to 12) */}
               {weekDays.map((day, colIdx) => (
                 <div key={`col-${day.id}`} className="day-column" style={{ gridColumn: colIdx + 2, gridRow: '2 / span 11' }}>
-                  <DroppableDay dateStr={day.id}>
+                  <DroppableDay dateStr={day.id} dragTimeHint={dragTimeHint}>
                     {layoutDayTasks(scheduledTasks.filter(t => t.dateStr === day.id)).map(result => (
                       <ScheduledTaskBlock 
                         key={result.task.id} 
@@ -1023,6 +1209,16 @@ export default function App() {
               ))}
             </div>
           </div>
+
+          <PrintWeekSchedule
+            weekDays={weekDays}
+            currentWeekNumber={currentWeekNumber}
+            weekStartStr={weekStartStr}
+            weekEndStr={weekEndStr}
+            scheduledTasks={scheduledTasks}
+            employees={employees}
+            activeRuns={activeRuns}
+          />
         </div>
         ) : (
           <TeamManagement 
@@ -1110,7 +1306,10 @@ export default function App() {
                 <div className="task-title" style={{ fontSize: '0.875rem' }}>{activeDragItem.data.current.taskTemplate.name}</div>
                 <div className="task-meta">
                   <Clock size={12} />
-                  {activeDragItem.data.current.inputAmount} {activeDragItem.data.current.taskTemplate.unitName}
+                  {formatAmountLabel(
+                    activeDragItem.data.current.inputAmount,
+                    activeDragItem.data.current.taskTemplate.unitName
+                  )}
                 </div>
               </div>
             </div>

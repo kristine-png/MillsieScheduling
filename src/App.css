@@ -406,6 +406,31 @@
   border-bottom: none;
 }
 
+.drop-time-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 80;
+  pointer-events: none;
+  transform: translateY(-50%);
+  border-top: 2px solid var(--primary);
+}
+
+.drop-time-hint span {
+  position: absolute;
+  left: 0.35rem;
+  top: -0.95rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: var(--radius-sm);
+  background: var(--primary);
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: var(--shadow-sm);
+  white-space: nowrap;
+}
+
 /* Week Navigation */
 .week-navigation {
   display: flex;
@@ -618,6 +643,170 @@
 }
 .btn-primary:hover {
   background: var(--primary-hover);
+}
+
+.print-week-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.875rem;
+}
+
+.print-week {
+  display: none;
+}
+
+.print-week-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 2px solid #111827;
+}
+
+.print-week-header h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.35rem;
+}
+
+.print-week-header p,
+.print-generated {
+  margin: 0;
+  color: #374151;
+  font-size: 0.85rem;
+}
+
+.print-day-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.print-day {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.print-day-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.35rem 0.5rem;
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-bottom: none;
+}
+
+.print-day-title h2 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.print-day-title span {
+  color: #4b5563;
+  font-size: 0.8rem;
+}
+
+.print-empty-day {
+  padding: 0.55rem;
+  border: 1px solid #d1d5db;
+  color: #6b7280;
+  font-size: 0.8rem;
+}
+
+.print-task-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 0.74rem;
+}
+
+.print-task-table th,
+.print-task-table td {
+  border: 1px solid #d1d5db;
+  padding: 0.3rem 0.35rem;
+  text-align: left;
+  vertical-align: top;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.print-task-table th {
+  background: #f9fafb;
+  font-weight: 700;
+}
+
+.print-task-table th:nth-child(1),
+.print-task-table td:nth-child(1) {
+  width: 14%;
+}
+
+.print-task-table th:nth-child(2),
+.print-task-table td:nth-child(2) {
+  width: 20%;
+}
+
+.print-task-table th:nth-child(3),
+.print-task-table td:nth-child(3),
+.print-task-table th:nth-child(4),
+.print-task-table td:nth-child(4) {
+  width: 11%;
+}
+
+.print-task-table th:nth-child(5),
+.print-task-table td:nth-child(5) {
+  width: 15%;
+}
+
+.print-task-table th:nth-child(6),
+.print-task-table td:nth-child(6) {
+  width: 29%;
+}
+
+@media print {
+  @page {
+    size: landscape;
+    margin: 0.35in;
+  }
+
+  html,
+  body,
+  #root {
+    width: auto;
+    height: auto;
+    overflow: visible;
+    background: white !important;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .app-layout,
+  .schedule-main {
+    display: block;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    background: white !important;
+  }
+
+  .sidebar-panel,
+  .schedule-header,
+  .schedule-grid-container,
+  .modal-overlay {
+    display: none !important;
+  }
+
+  .print-week {
+    display: block;
+    color: #111827;
+    font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
 }
 
 /* Skill Badges */
