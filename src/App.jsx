@@ -728,6 +728,7 @@ export default function App() {
       };
     });
   }, [currentDate]);
+  const weekDayIds = useMemo(() => new Set(weekDays.map(day => day.id)), [weekDays]);
 
   const currentWeekNumber = getWeek(currentDate, { weekStartsOn: 1 });
   const weekStartStr = weekDays[0].formattedDate;
@@ -743,6 +744,7 @@ export default function App() {
 
   const [activeDragItem, setActiveDragItem] = useState(null);
   const [dragTimeHint, setDragTimeHint] = useState(null);
+  const visibleWeekTaskCount = scheduledTasks.filter(task => weekDayIds.has(task.dateStr)).length;
 
   const handleRunSetupAmountChange = (runTemplateId, amount) => {
     setRunSetups(prev => ({
@@ -1025,6 +1027,22 @@ export default function App() {
     setAssigningTask(null);
   };
 
+  const handleClearWeek = () => {
+    if (visibleWeekTaskCount === 0) return;
+    if (!window.confirm(`Clear all ${visibleWeekTaskCount} scheduled process blocks from this week?`)) return;
+
+    const remainingTasks = scheduledTasks.filter(task => !weekDayIds.has(task.dateStr));
+    const remainingRunIds = new Set(remainingTasks.map(task => task.runId));
+
+    setScheduledTasks(remainingTasks);
+    setActiveRuns(prev => prev.filter(run => remainingRunIds.has(run.id)));
+
+    if (assigningTask && weekDayIds.has(assigningTask.dateStr)) {
+      setIsAssignModalOpen(false);
+      setAssigningTask(null);
+    }
+  };
+
   return (
     <DndContext
       sensors={sensors}
@@ -1164,6 +1182,15 @@ export default function App() {
               <button className="btn btn-secondary print-week-button" onClick={() => window.print()}>
                 <Printer size={16} />
                 Print Week
+              </button>
+              <button
+                className="btn btn-danger clear-week-button"
+                disabled={visibleWeekTaskCount === 0}
+                onClick={handleClearWeek}
+                title="Clear scheduled blocks from this week"
+              >
+                <Trash2 size={16} />
+                Clear Week
               </button>
             </div>
           </div>
