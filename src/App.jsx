@@ -1,35 +1,386 @@
 import { useState, useMemo } from 'react';
 import { DndContext, useDraggable, useDroppable, pointerWithin, useSensors, useSensor, PointerSensor, DragOverlay } from '@dnd-kit/core';
 import { initialEmployees, taskTemplates, runTemplates, hoursOfDay } from './data';
-import { Clock, GripVertical, AlertCircle, Users, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Plus, Trash2, Edit2 } from 'lucide-react';
+import { Clock, GripVertical, AlertCircle, Users, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { format, addWeeks, subWeeks, startOfWeek, addDays, getWeek } from 'date-fns';
 import TeamManagement from './TeamManagement';
 import './App.css';
 
-// Draggable Sidebar Item (Pre-calculated Generated Task)
-function DraggableGeneratedTask({ task }) {
+const defaultFermentationAssignments = {
+  'task-sanitation': ['emp-2'],
+  'task-stickering': ['emp-2'],
+  'task-boiling': ['emp-2'],
+  'task-mixing': ['emp-1'],
+  'task-cleanup': ['emp-1'],
+};
+
+function createInitialRunSetups() {
+  return Object.fromEntries(
+    runTemplates.map(runTemplate => [
+      runTemplate.id,
+      {
+        amount: '1',
+        flavorCount: '1',
+        defaultEmployeeId: '',
+        assignments: runTemplate.id === 'run-fermentation' ? defaultFermentationAssignments : {},
+      },
+    ])
+  );
+}
+
+function createInitialProcessSetups() {
+  const processFolderRunIds = new Set(['run-veg-prep', 'run-packaging-prep']);
+  const processFolderTasks = runTemplates
+    .filter(runTemplate => processFolderRunIds.has(runTemplate.id))
+    .flatMap(runTemplate => runTemplate.tasks);
+  return Object.fromEntries(
+    processFolderTasks.map(taskId => [taskId, { amount: '1', employeeIds: [] }])
+  );
+}
+
+function getTaskDuration(template, amount) {
+  let duration = template.baseMinutes;
+  if (template.variableMinutesPerCycle > 0) {
+    const cycles = template.isBatchProcess
+      ? Math.ceil(amount / template.unitsPerCycle)
+      : amount / template.unitsPerCycle;
+    duration += cycles * template.variableMinutesPerCycle;
+  }
+  return Math.round(duration);
+}
+
+function formatDuration(minutes) {
+  const roundedMinutes = Math.round(minutes);
+  const hours = Math.floor(roundedMinutes / 60);
+  const remainingMinutes = roundedMinutes % 60;
+
+  if (hours === 0) return `${remainingMinutes}m`;
+  if (remainingMinutes === 0) return `${hours}h`;
+  return `${hours}h ${remainingMinutes}m`;
+}
+
+function getTaskAmountForRun(taskId, amount, flavorCount = 1) {
+  if (taskId === 'task-dip-line-changeover' || taskId === 'task-flavor-changeover') {
+    return Math.max(0, Number(flavorCount) - 1);
+  }
+  return amount;
+}
+
+function hasFlavorCountField(runTemplateId) {
+  return runTemplateId === 'run-dip-processing' || runTemplateId === 'run-dip-mixing';
+}
+
+function hasDefaultEmployeeField(runTemplateId) {
+  return runTemplateId === 'run-dip-mixing';
+}
+
+function getRunDisplayName(runTemplate, inputAmount, inputUnit, fallbackName = 'Production Run') {
+  return `${runTemplate?.name || fallbackName} (${inputAmount} ${inputUnit})`;
+}
+
+function addMinutesToStart(startHour, startMinute, minutesToAdd) {
+  const totalMinutes = startHour * 60 + startMinute + minutesToAdd;
+  return {
+    startHour: Math.floor(totalMinutes / 60),
+    startMinute: totalMinutes % 60,
+  };
+}
+
+function getSequentialLayout(runTemplate, amount, flavorCount = 1) {
+  let offset = 0;
+  return Object.fromEntries(runTemplate.tasks.map(taskId => {
+    const template = taskTemplates.find(t => t.id === taskId);
+    const taskAmount = getTaskAmountForRun(taskId, amount, flavorCount);
+    const currentOffset = offset;
+    offset += template ? getTaskDuration(template, taskAmount) : 0;
+    return [taskId, currentOffset];
+  }));
+}
+
+function getRunLayout(runTemplate, amount, flavorCount = 1) {
+  if (runTemplate.id !== 'run-fermentation') {
+    return getSequentialLayout(runTemplate, amount, flavorCount);
+  }
+
+  const durationByTaskId = Object.fromEntries(
+    runTemplate.tasks.map(taskId => {
+      const template = taskTemplates.find(t => t.id === taskId);
+      return [taskId, template ? getTaskDuration(template, amount) : 0];
+    })
+  );
+
+  const sanitationDuration = durationByTaskId['task-sanitation'] || 0;
+  const stickeringDuration = durationByTaskId['task-stickering'] || 0;
+  const boilingDuration = durationByTaskId['task-boiling'] || 0;
+  const mixingDuration = durationByTaskId['task-mixing'] || 0;
+  const boilStartOffset = sanitationDuration + stickeringDuration;
+  const mixingStartOffset = boilStartOffset + 4;
+  const cleanupStartOffset = Math.max(
+    boilStartOffset + boilingDuration,
+    mixingStartOffset + Math.max(0, mixingDuration - 91)
+  );
+
+  return {
+    'task-sanitation': 0,
+    'task-stickering': sanitationDuration,
+    'task-boiling': boilStartOffset,
+    'task-mixing': mixingStartOffset,
+    'task-cleanup': cleanupStartOffset,
+  };
+}
+
+// Draggable Sidebar Item (Full Run Template)
+function DraggableRunTemplate({
+  runTemplate,
+  taskTemplates,
+  employees,
+  amount,
+  flavorCount,
+  defaultEmployeeId,
+  assignments,
+  isExpanded,
+  onToggle,
+  onAmountChange,
+  onFlavorCountChange,
+  onDefaultEmployeeChange,
+  onAssignmentChange,
+}) {
+  const parsedAmount = Math.max(1, Number(amount) || 1);
+  const parsedFlavorCount = Math.max(1, Number(flavorCount) || 1);
+  const changeovers = Math.max(0, parsedFlavorCount - 1);
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: `generated-${task.id}`,
-    data: { type: 'generated', task },
+    id: `run-template-${runTemplate.id}`,
+    data: {
+      type: 'run-template',
+      runTemplate,
+      inputAmount: parsedAmount,
+      flavorCount: parsedFlavorCount,
+      defaultEmployeeId,
+      assignments,
+    },
+  });
+
+  const totalConfiguredMinutes = runTemplate.tasks.reduce((sum, taskId) => {
+    const template = taskTemplates.find(t => t.id === taskId);
+    const taskAmount = getTaskAmountForRun(taskId, parsedAmount, parsedFlavorCount);
+    return template ? sum + getTaskDuration(template, taskAmount) : sum;
+  }, 0);
+
+  return (
+    <div className="run-setup-card">
+      <div
+        ref={setNodeRef}
+        {...listeners}
+        {...attributes}
+        className={`task-template task-${runTemplate.groupId}`}
+        style={{ opacity: isDragging ? 0.5 : 1, marginBottom: 0, touchAction: 'none' }}
+        onClick={onToggle}
+      >
+        <div className="run-drag-handle" aria-hidden="true">
+          <GripVertical size={16} className="drag-handle-icon" />
+        </div>
+        <div className="task-content-wrapper">
+          <div className="task-title" style={{ fontSize: '0.875rem' }}>{runTemplate.name}</div>
+          <div className="task-meta">
+            <Clock size={12} />
+            {parsedAmount} {runTemplate.inputUnit}, {formatDuration(totalConfiguredMinutes)} total work
+          </div>
+        </div>
+        <ChevronDown size={16} className={`run-expand-icon ${isExpanded ? 'is-expanded' : ''}`} />
+      </div>
+
+      {isExpanded && (
+      <div className="run-setup-controls">
+        <label className="compact-field">
+          <span>{runTemplate.inputUnit}</span>
+          <input
+            type="number"
+            min="1"
+            value={amount}
+            onChange={e => onAmountChange(e.target.value)}
+          />
+        </label>
+
+        {hasFlavorCountField(runTemplate.id) && (
+          <label className="compact-field">
+            <span>Flavours</span>
+            <input
+              type="number"
+              min="1"
+              value={flavorCount}
+              onChange={e => onFlavorCountChange(e.target.value)}
+            />
+            <small>{changeovers} changeovers</small>
+          </label>
+        )}
+
+        {hasDefaultEmployeeField(runTemplate.id) && (
+          <div className="run-assignment-row">
+            <label className="run-assignment-name" htmlFor={`${runTemplate.id}-default-employee`}>Main employee</label>
+            <select
+              id={`${runTemplate.id}-default-employee`}
+              value={defaultEmployeeId || ''}
+              onChange={e => onDefaultEmployeeChange(e.target.value)}
+            >
+              <option value="">Unassigned</option>
+              {employees.map(emp => (
+                <option key={emp.id} value={emp.id}>{emp.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div className="run-assignment-list">
+          {runTemplate.tasks.map(taskId => {
+            const task = taskTemplates.find(t => t.id === taskId);
+            if (!task) return null;
+            const overrideEmployeeId = (assignments[taskId] || [])[0] || '';
+            const defaultEmployee = employees.find(emp => emp.id === defaultEmployeeId);
+            const defaultOptionLabel = defaultEmployee
+              ? `Use main employee (${defaultEmployee.name})`
+              : 'Use main employee';
+
+            return (
+              <div key={taskId} className="run-assignment-row">
+                <label className="run-assignment-name" htmlFor={`${runTemplate.id}-${taskId}-employee`}>{task.name}</label>
+                <select
+                  id={`${runTemplate.id}-${taskId}-employee`}
+                  value={overrideEmployeeId}
+                  onChange={e => onAssignmentChange(taskId, e.target.value)}
+                >
+                  {hasDefaultEmployeeField(runTemplate.id) ? (
+                    <option value="">{defaultOptionLabel}</option>
+                  ) : (
+                    <option value="">Unassigned</option>
+                  )}
+                  {employees.map(emp => (
+                    <option key={emp.id} value={emp.id}>{emp.name}</option>
+                  ))}
+                </select>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      )}
+    </div>
+  );
+}
+
+function DraggableProcessTemplate({
+  task,
+  employees,
+  amount,
+  employeeId,
+  onAmountChange,
+  onEmployeeChange,
+}) {
+  const parsedAmount = Math.max(1, Number(amount) || 1);
+  const duration = getTaskDuration(task, parsedAmount);
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `task-template-${task.id}`,
+    data: {
+      type: 'task-template',
+      taskTemplate: task,
+      inputAmount: parsedAmount,
+      employeeIds: employeeId ? [employeeId] : [],
+    },
   });
 
   return (
-    <div
-      ref={setNodeRef}
-      {...listeners}
-      {...attributes}
-      className={`task-template task-${task.groupId}`}
-      style={{ opacity: isDragging ? 0.5 : 1, touchAction: 'none' }}
-    >
-      <GripVertical size={16} className="drag-handle-icon" />
-      <div className="task-content-wrapper">
-        <div className="task-title" style={{ fontSize: '0.875rem' }}>{task.name}</div>
-        <div className="task-meta">
-          <Clock size={12} />
-          {task.duration}m
+    <div className="process-setup-row">
+      <div
+        ref={setNodeRef}
+        {...listeners}
+        {...attributes}
+        className={`task-template task-${task.groupId} process-task-card`}
+        style={{ opacity: isDragging ? 0.5 : 1, marginBottom: 0, touchAction: 'none' }}
+      >
+        <div className="run-drag-handle" aria-hidden="true">
+          <GripVertical size={16} className="drag-handle-icon" />
+        </div>
+        <div className="task-content-wrapper">
+          <div className="task-title" style={{ fontSize: '0.825rem' }}>{task.name}</div>
+          <div className="task-meta">
+            <Clock size={12} />
+            {parsedAmount} {task.unitName}, {formatDuration(duration)}
+          </div>
         </div>
       </div>
+      <div className="process-setup-controls">
+        <label className="compact-field process-amount-field">
+          <span>{task.unitName}</span>
+          <input
+            type="number"
+            min="1"
+            value={amount}
+            onChange={e => onAmountChange(e.target.value)}
+          />
+        </label>
+        <select
+          value={employeeId || ''}
+          onChange={e => onEmployeeChange(e.target.value)}
+          aria-label={`${task.name} person`}
+        >
+          <option value="">Unassigned</option>
+          {employees.map(emp => (
+            <option key={emp.id} value={emp.id}>{emp.name}</option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
+
+function ProcessFolder({
+  runTemplate,
+  taskTemplates,
+  employees,
+  processSetups,
+  isExpanded,
+  onToggle,
+  onAmountChange,
+  onEmployeeChange,
+}) {
+  return (
+    <div className="run-setup-card">
+      <button
+        type="button"
+        className={`task-template task-${runTemplate.groupId} run-folder-button`}
+        onClick={onToggle}
+      >
+        <div className="task-content-wrapper">
+          <div className="task-title" style={{ fontSize: '0.875rem' }}>{runTemplate.name}</div>
+          <div className="task-meta">
+            <Clock size={12} />
+            Separate process cards
+          </div>
+        </div>
+        <ChevronDown size={16} className={`run-expand-icon ${isExpanded ? 'is-expanded' : ''}`} />
+      </button>
+
+      {isExpanded && (
+        <div className="run-setup-controls process-folder-controls">
+          {runTemplate.tasks.map(taskId => {
+            const task = taskTemplates.find(t => t.id === taskId);
+            if (!task) return null;
+            const setup = processSetups[taskId] || { amount: '1', employeeIds: [] };
+
+            return (
+              <DraggableProcessTemplate
+                key={taskId}
+                task={task}
+                employees={employees}
+                amount={setup.amount}
+                employeeId={setup.employeeIds?.[0] || ''}
+                onAmountChange={amount => onAmountChange(taskId, amount)}
+                onEmployeeChange={employeeId => onEmployeeChange(taskId, employeeId)}
+              />
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -135,8 +486,10 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
     data: { type: 'scheduled', scheduledTask },
   });
 
-  const assignedEmp = employees.find(e => e.id === scheduledTask.employeeId);
-  const skillLevel = assignedEmp ? assignedEmp.skills[scheduledTask.templateId] || 'untrained' : null;
+  const assignedEmployees = (scheduledTask.employeeIds || (scheduledTask.employeeId ? [scheduledTask.employeeId] : []))
+    .map(employeeId => employees.find(e => e.id === employeeId))
+    .filter(Boolean);
+  const hasUntrainedEmployee = assignedEmployees.some(emp => (emp.skills[scheduledTask.templateId] || 'untrained') === 'untrained');
   
   const height = Math.max((scheduledTask.duration / 60) * 80, 24);
   const startMins = (scheduledTask.startHour - 7) * 60 + (scheduledTask.startMinute || 0);
@@ -183,12 +536,12 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
     >
       <div className="task-title" style={{ fontSize: widthPercent < 50 ? '0.75rem' : '0.875rem' }}>{scheduledTask.name}</div>
       <div className="task-meta" style={{ marginBottom: '2px', fontSize: '0.7rem' }}>
-        {timeString} ({scheduledTask.duration}m)
+        {scheduledTask.inputAmount ? `${scheduledTask.inputAmount} ${scheduledTask.inputUnit} - ` : ''}{timeString} ({formatDuration(scheduledTask.duration)})
       </div>
-      {assignedEmp ? (
+      {assignedEmployees.length > 0 ? (
         <div className="task-meta">
-          <Users size={12} /> <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{assignedEmp.name}</span>
-          {skillLevel === 'untrained' && <AlertCircle size={12} color="var(--danger)" style={{ flexShrink: 0 }} />}
+          <Users size={12} /> <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{assignedEmployees.map(emp => emp.name).join(', ')}</span>
+          {hasUntrainedEmployee && <AlertCircle size={12} color="var(--danger)" style={{ flexShrink: 0 }} />}
         </div>
       ) : (
         <div className="task-meta" style={{ color: 'var(--danger)', fontWeight: 500 }}>
@@ -223,21 +576,81 @@ export default function App() {
   const weekStartStr = weekDays[0].formattedDate;
   const weekEndStr = weekDays[4].formattedDate;
   
-  const [isNewRunModalOpen, setIsNewRunModalOpen] = useState(false);
-  const [selectedRunTemplate, setSelectedRunTemplate] = useState(runTemplates[0].id);
-  const [runInputAmount, setRunInputAmount] = useState('1');
-  const [runMultiInputAmount, setRunMultiInputAmount] = useState({});
-
-  const [isEditRunModalOpen, setIsEditRunModalOpen] = useState(false);
-  const [editingRunId, setEditingRunId] = useState(null);
-  const [editRunInputAmount, setEditRunInputAmount] = useState('');
-  const [editRunMultiInputAmount, setEditRunMultiInputAmount] = useState({});
-
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [assigningTask, setAssigningTask] = useState(null);
-  const [selectedEmployee, setSelectedEmployee] = useState('');
+  const [selectedEmployees, setSelectedEmployees] = useState([]);
+  const [selectedRunAmount, setSelectedRunAmount] = useState('1');
+  const [runSetups, setRunSetups] = useState(() => createInitialRunSetups());
+  const [processSetups, setProcessSetups] = useState(() => createInitialProcessSetups());
+  const [expandedRunId, setExpandedRunId] = useState(null);
 
   const [activeDragItem, setActiveDragItem] = useState(null);
+
+  const handleRunSetupAmountChange = (runTemplateId, amount) => {
+    setRunSetups(prev => ({
+      ...prev,
+      [runTemplateId]: {
+        ...(prev[runTemplateId] || { assignments: {} }),
+        amount,
+      },
+    }));
+  };
+
+  const handleRunSetupFlavorCountChange = (runTemplateId, flavorCount) => {
+    setRunSetups(prev => ({
+      ...prev,
+      [runTemplateId]: {
+        ...(prev[runTemplateId] || { amount: '1', assignments: {} }),
+        flavorCount,
+      },
+    }));
+  };
+
+  const handleRunSetupDefaultEmployeeChange = (runTemplateId, defaultEmployeeId) => {
+    setRunSetups(prev => ({
+      ...prev,
+      [runTemplateId]: {
+        ...(prev[runTemplateId] || { amount: '1', assignments: {} }),
+        defaultEmployeeId,
+      },
+    }));
+  };
+
+  const handleRunSetupAssignmentChange = (runTemplateId, taskId, employeeId) => {
+    setRunSetups(prev => {
+      const runSetup = prev[runTemplateId] || { amount: '1', assignments: {} };
+      return {
+        ...prev,
+        [runTemplateId]: {
+          ...runSetup,
+          assignments: {
+            ...runSetup.assignments,
+            [taskId]: employeeId ? [employeeId] : [],
+          },
+        },
+      };
+    });
+  };
+
+  const handleProcessAmountChange = (taskId, amount) => {
+    setProcessSetups(prev => ({
+      ...prev,
+      [taskId]: {
+        ...(prev[taskId] || { employeeIds: [] }),
+        amount,
+      },
+    }));
+  };
+
+  const handleProcessEmployeeChange = (taskId, employeeId) => {
+    setProcessSetups(prev => ({
+      ...prev,
+      [taskId]: {
+        ...(prev[taskId] || { amount: '1' }),
+        employeeIds: employeeId ? [employeeId] : [],
+      },
+    }));
+  };
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -271,33 +684,88 @@ export default function App() {
         startMinute -= 60;
       }
 
-      if (active.data.current?.type === 'generated') {
-        const generatedTask = active.data.current.task;
+      if (active.data.current?.type === 'run-template') {
+        const runTemplate = active.data.current.runTemplate;
+        const runId = uuidv4();
+        const inputAmount = Math.max(1, Number(active.data.current.inputAmount) || 1);
+        const flavorCount = Math.max(1, Number(active.data.current.flavorCount) || 1);
+        const defaultEmployeeId = active.data.current.defaultEmployeeId || '';
+        const assignments = active.data.current.assignments || {};
+        const layoutOffsets = getRunLayout(runTemplate, inputAmount, flavorCount);
 
-        const newTask = {
+        const newTasks = runTemplate.tasks.map(taskId => {
+          const template = taskTemplates.find(t => t.id === taskId);
+          if (!template) return null;
+
+          const taskAmount = getTaskAmountForRun(taskId, inputAmount, flavorCount);
+          if (taskAmount <= 0) return null;
+
+          const taskStart = addMinutesToStart(startHour, startMinute, layoutOffsets[taskId] || 0);
+          const duration = getTaskDuration(template, taskAmount);
+
+          return {
+            id: uuidv4(),
+            runId,
+            templateId: template.id,
+            groupId: template.groupId,
+            name: template.name,
+            dateStr,
+            startHour: taskStart.startHour,
+            startMinute: taskStart.startMinute,
+            duration,
+            employeeIds: assignments[template.id] || (defaultEmployeeId ? [defaultEmployeeId] : []),
+            inputAmount: taskAmount,
+            inputUnit: template.unitName,
+            buckets: taskAmount,
+          };
+        }).filter(Boolean);
+
+        setScheduledTasks(prev => [...prev, ...newTasks]);
+        setActiveRuns(prev => [...prev, {
+          id: runId,
+          templateId: runTemplate.id,
+          inputAmount,
+          flavorCount,
+          defaultEmployeeId,
+          name: `${runTemplate.name} (${inputAmount} ${runTemplate.inputUnit})`,
+          groupId: runTemplate.groupId,
+          inputUnit: runTemplate.inputUnit,
+          buckets: inputAmount,
+        }]);
+      }
+
+      if (active.data.current?.type === 'task-template') {
+        const template = active.data.current.taskTemplate;
+        const runId = uuidv4();
+        const inputAmount = Math.max(1, Number(active.data.current.inputAmount) || 1);
+        const inputUnit = template.unitName;
+        const duration = getTaskDuration(template, inputAmount);
+
+        setScheduledTasks(prev => [...prev, {
           id: uuidv4(),
-          templateId: generatedTask.templateId,
-          groupId: generatedTask.groupId,
-          name: generatedTask.name,
+          runId,
+          templateId: template.id,
+          groupId: template.groupId,
+          name: template.name,
           dateStr,
           startHour,
           startMinute,
-          duration: generatedTask.duration,
-          employeeId: null,
-          runId: generatedTask.runId
-        };
-        
-        setScheduledTasks([...scheduledTasks, newTask]);
-        
-        setActiveRuns(prev => prev.map(run => {
-          if (run.id === generatedTask.runId) {
-            return {
-              ...run,
-              generatedTasks: run.generatedTasks.filter(t => t.id !== generatedTask.id)
-            };
-          }
-          return run;
-        }));
+          duration,
+          employeeIds: active.data.current.employeeIds || [],
+          inputAmount,
+          inputUnit,
+          buckets: inputAmount,
+        }]);
+        setActiveRuns(prev => [...prev, {
+          id: runId,
+          templateId: null,
+          inputAmount,
+          inputUnit,
+          baseName: template.name,
+          name: getRunDisplayName(null, inputAmount, inputUnit, template.name),
+          groupId: template.groupId,
+          buckets: inputAmount,
+        }]);
       }
       
       if (active.data.current?.type === 'scheduled') {
@@ -311,211 +779,63 @@ export default function App() {
     }
   };
 
-  const handleAddRun = (e) => {
-    e.preventDefault();
-    const runTemplate = runTemplates.find(rt => rt.id === selectedRunTemplate);
-    if (!runTemplate) return;
-
-    const runId = uuidv4();
-    let generatedTasks = [];
-    let parsedInputAmount = 1;
-    let totalBuckets = 0;
-    let runName = runTemplate.name;
-    let inputAmountObj = null;
-
-    if (runTemplate.inputType === 'multiple') {
-      inputAmountObj = {};
-      generatedTasks = runTemplate.tasks.map(taskId => {
-        const template = taskTemplates.find(t => t.id === taskId);
-        if (!template) return null;
-        
-        const taskInput = Number(runMultiInputAmount[taskId]) || 1;
-        inputAmountObj[taskId] = taskInput;
-        
-        let duration = template.baseMinutes;
-        if (template.variableMinutesPerCycle > 0) {
-          const cycles = template.isBatchProcess 
-            ? Math.ceil(taskInput / template.unitsPerCycle)
-            : (taskInput / template.unitsPerCycle);
-          duration += cycles * template.variableMinutesPerCycle;
-        }
-
-        return {
-          id: uuidv4(),
-          runId,
-          templateId: template.id,
-          groupId: template.groupId,
-          name: `${template.name} (${taskInput} ${template.unitName})`,
-          duration: Math.round(duration)
-        };
-      }).filter(Boolean);
-      
-      runName = `${runTemplate.name} (Mixed Amounts)`;
-    } else {
-      parsedInputAmount = Number(runInputAmount) || 1;
-      totalBuckets = parsedInputAmount * runTemplate.bucketsPerInputUnit;
-      
-      generatedTasks = runTemplate.tasks.map(taskId => {
-        const template = taskTemplates.find(t => t.id === taskId);
-        if (!template) return null;
-
-        let duration = template.baseMinutes;
-        if (template.variableMinutesPerCycle > 0) {
-          const cycles = template.isBatchProcess 
-            ? Math.ceil(totalBuckets / template.unitsPerCycle)
-            : (totalBuckets / template.unitsPerCycle);
-          duration += cycles * template.variableMinutesPerCycle;
-        }
-
-        return {
-          id: uuidv4(),
-          runId,
-          templateId: template.id,
-          groupId: template.groupId,
-          name: template.name,
-          duration: Math.round(duration)
-        };
-      }).filter(Boolean);
-      
-      runName = `${runTemplate.name} (${parsedInputAmount} ${runTemplate.inputUnit})`;
-    }
-
-    const newRun = {
-      id: runId,
-      templateId: runTemplate.id,
-      inputAmount: runTemplate.inputType === 'multiple' ? null : parsedInputAmount,
-      multiInputAmount: inputAmountObj,
-      name: runName,
-      groupId: runTemplate.groupId,
-      buckets: totalBuckets,
-      generatedTasks
-    };
-
-    setActiveRuns([...activeRuns, newRun]);
-    setIsNewRunModalOpen(false);
-    setRunInputAmount('1');
-    setRunMultiInputAmount({});
-  };
-
-  const handleEditRunSubmit = (e) => {
-    e.preventDefault();
-    const runToEdit = activeRuns.find(r => r.id === editingRunId);
-    if (!runToEdit) return;
-
-    const runTemplate = runTemplates.find(rt => rt.id === runToEdit.templateId);
-    if (!runTemplate) return;
-
-    let parsedInputAmount = 1;
-    let totalBuckets = 0;
-    let runName = runTemplate.name;
-    let inputAmountObj = null;
-
-    if (runTemplate.inputType === 'multiple') {
-      inputAmountObj = {};
-      
-      const getNewDurationAndName = (taskId) => {
-        const template = taskTemplates.find(t => t.id === taskId);
-        if (!template) return { duration: 0, name: '' };
-        
-        const taskInput = Number(editRunMultiInputAmount[taskId]) || 1;
-        inputAmountObj[taskId] = taskInput;
-        
-        let duration = template.baseMinutes;
-        if (template.variableMinutesPerCycle > 0) {
-          const cycles = template.isBatchProcess 
-            ? Math.ceil(taskInput / template.unitsPerCycle)
-            : (taskInput / template.unitsPerCycle);
-          duration += cycles * template.variableMinutesPerCycle;
-        }
-        return { 
-          duration: Math.round(duration), 
-          name: `${template.name} (${taskInput} ${template.unitName})`
-        };
-      };
-
-      runName = `${runTemplate.name} (Mixed Amounts)`;
-
-      setActiveRuns(prev => prev.map(run => {
-        if (run.id === editingRunId) {
-          return {
-            ...run,
-            name: runName,
-            multiInputAmount: inputAmountObj,
-            generatedTasks: run.generatedTasks.map(t => {
-              const { duration, name } = getNewDurationAndName(t.templateId);
-              return { ...t, duration, name };
-            })
-          };
-        }
-        return run;
-      }));
-
-      setScheduledTasks(prev => prev.map(t => {
-        if (t.runId === editingRunId) {
-          const { duration, name } = getNewDurationAndName(t.templateId);
-          return { ...t, duration, name };
-        }
-        return t;
-      }));
-
-    } else {
-      parsedInputAmount = Number(editRunInputAmount) || 1;
-      totalBuckets = parsedInputAmount * runTemplate.bucketsPerInputUnit;
-      runName = `${runTemplate.name} (${parsedInputAmount} ${runTemplate.inputUnit})`;
-
-      const getNewDuration = (taskId) => {
-        const template = taskTemplates.find(t => t.id === taskId);
-        if (!template) return 0;
-        let duration = template.baseMinutes;
-        if (template.variableMinutesPerCycle > 0) {
-          const cycles = template.isBatchProcess 
-            ? Math.ceil(totalBuckets / template.unitsPerCycle)
-            : (totalBuckets / template.unitsPerCycle);
-          duration += cycles * template.variableMinutesPerCycle;
-        }
-        return Math.round(duration);
-      };
-
-      setActiveRuns(prev => prev.map(run => {
-        if (run.id === editingRunId) {
-          return {
-            ...run,
-            name: runName,
-            buckets: totalBuckets,
-            inputAmount: parsedInputAmount,
-            generatedTasks: run.generatedTasks.map(t => ({
-              ...t,
-              duration: getNewDuration(t.templateId)
-            }))
-          };
-        }
-        return run;
-      }));
-
-      setScheduledTasks(prev => prev.map(t => {
-        if (t.runId === editingRunId) {
-          return {
-            ...t,
-            duration: getNewDuration(t.templateId)
-          };
-        }
-        return t;
-      }));
-    }
-
-    setIsEditRunModalOpen(false);
-    setEditingRunId(null);
-  };
-
   const handleAssignSubmit = (e) => {
     e.preventDefault();
     if (!assigningTask) return;
 
-    setScheduledTasks(prev => prev.map(t => 
-      t.id === assigningTask.id 
-        ? { ...t, employeeId: selectedEmployee || null }
-        : t
+    const inputAmount = Math.max(1, Number(selectedRunAmount) || 1);
+    const activeRun = activeRuns.find(r => r.id === assigningTask.runId);
+    const runTemplate = runTemplates.find(rt => rt.id === activeRun?.templateId);
+    const inputUnit = runTemplate?.inputUnit || assigningTask.inputUnit || activeRun?.inputUnit || 'units';
+
+    setActiveRuns(prev => prev.map(run => run.id === assigningTask.runId
+      ? {
+          ...run,
+          inputAmount,
+          inputUnit,
+          buckets: inputAmount,
+          name: getRunDisplayName(runTemplate, inputAmount, inputUnit, run.baseName || assigningTask.name),
+        }
+      : run
     ));
+
+    setScheduledTasks(prev => {
+      const runTasks = prev
+        .filter(t => t.runId === assigningTask.runId)
+        .sort((a, b) => {
+          const aIndex = runTemplate?.tasks.indexOf(a.templateId) ?? 0;
+          const bIndex = runTemplate?.tasks.indexOf(b.templateId) ?? 0;
+          return aIndex - bIndex;
+        });
+
+      const firstTask = runTasks[0];
+      const updates = new Map();
+      const flavorCount = activeRun?.flavorCount || 1;
+      const layoutOffsets = runTemplate ? getRunLayout(runTemplate, inputAmount, flavorCount) : {};
+
+      runTasks.forEach(t => {
+        const template = taskTemplates.find(tt => tt.id === t.templateId);
+        const taskAmount = getTaskAmountForRun(t.templateId, inputAmount, flavorCount);
+        const duration = template ? getTaskDuration(template, taskAmount) : t.duration;
+        const taskStart = firstTask
+          ? addMinutesToStart(firstTask.startHour, firstTask.startMinute || 0, layoutOffsets[t.templateId] || 0)
+          : { startHour: t.startHour, startMinute: t.startMinute || 0 };
+
+        updates.set(t.id, {
+          ...t,
+          dateStr: firstTask?.dateStr || t.dateStr,
+          startHour: taskStart.startHour,
+          startMinute: taskStart.startMinute,
+          inputAmount: taskAmount,
+          inputUnit: template?.unitName || inputUnit,
+          buckets: taskAmount,
+          duration,
+          employeeIds: t.id === assigningTask.id ? selectedEmployees : (t.employeeIds || []),
+        });
+      });
+
+      return prev.map(t => updates.get(t.id) || t);
+    });
 
     setIsAssignModalOpen(false);
     setAssigningTask(null);
@@ -524,26 +844,10 @@ export default function App() {
   const handleDeleteTask = () => {
     if (!assigningTask) return;
 
-    // Remove from calendar
     setScheduledTasks(prev => prev.filter(t => t.id !== assigningTask.id));
-
-    // Put it back in the sidebar
-    setActiveRuns(prev => prev.map(run => {
-      if (run.id === assigningTask.runId) {
-        return {
-          ...run,
-          generatedTasks: [...run.generatedTasks, {
-            id: assigningTask.id, // Re-use ID so React keys don't complain
-            runId: assigningTask.runId,
-            templateId: assigningTask.templateId,
-            groupId: assigningTask.groupId,
-            name: assigningTask.name,
-            duration: assigningTask.duration
-          }]
-        };
-      }
-      return run;
-    }));
+    setActiveRuns(prev => prev.filter(run => (
+      run.id !== assigningTask.runId || scheduledTasks.some(t => t.runId === run.id && t.id !== assigningTask.id)
+    )));
 
     setIsAssignModalOpen(false);
     setAssigningTask(null);
@@ -574,43 +878,63 @@ export default function App() {
                 Team
               </button>
             </div>
-          </div>
+            </div>
           
           {currentView === 'schedule' && (
             <div className="sidebar-content" style={{ padding: '1rem' }}>
-              <div className="section-title">Active Runs</div>
-              <button className="btn btn-primary" style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem' }} onClick={() => setIsNewRunModalOpen(true)}>
-                <Plus size={16} /> New Production Run
-              </button>
+              <div>
+                <div className="section-title">Run Blocks</div>
+                {runTemplates.map(runTemplate => {
+                  const runSetup = runSetups[runTemplate.id] || { amount: '1', assignments: {} };
+                  if (runTemplate.id === 'run-veg-prep' || runTemplate.id === 'run-packaging-prep') {
+                    return (
+                      <ProcessFolder
+                        key={runTemplate.id}
+                        runTemplate={runTemplate}
+                        taskTemplates={taskTemplates}
+                        employees={employees}
+                        processSetups={processSetups}
+                        isExpanded={expandedRunId === runTemplate.id}
+                        onToggle={() => setExpandedRunId(prev => prev === runTemplate.id ? null : runTemplate.id)}
+                        onAmountChange={handleProcessAmountChange}
+                        onEmployeeChange={handleProcessEmployeeChange}
+                      />
+                    );
+                  }
+
+                  return (
+                    <DraggableRunTemplate
+                      key={runTemplate.id}
+                      runTemplate={runTemplate}
+                      taskTemplates={taskTemplates}
+                      employees={employees}
+                      amount={runSetup.amount}
+                      flavorCount={runSetup.flavorCount || '1'}
+                      defaultEmployeeId={runSetup.defaultEmployeeId || ''}
+                      assignments={runSetup.assignments}
+                      isExpanded={expandedRunId === runTemplate.id}
+                      onToggle={() => setExpandedRunId(prev => prev === runTemplate.id ? null : runTemplate.id)}
+                      onAmountChange={amount => handleRunSetupAmountChange(runTemplate.id, amount)}
+                      onFlavorCountChange={flavorCount => handleRunSetupFlavorCountChange(runTemplate.id, flavorCount)}
+                      onDefaultEmployeeChange={employeeId => handleRunSetupDefaultEmployeeChange(runTemplate.id, employeeId)}
+                      onAssignmentChange={(taskId, employeeId) => handleRunSetupAssignmentChange(runTemplate.id, taskId, employeeId)}
+                    />
+                  );
+                })}
+              </div>
 
               <div style={{ marginTop: '2rem' }}>
+                <div className="section-title">Scheduled Runs</div>
                 {activeRuns.length === 0 && (
                   <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem', textAlign: 'center', padding: '2rem 0' }}>
-                    No active runs. Add one above.
+                    Drag a run block onto the schedule.
                   </div>
                 )}
                 {activeRuns.map(run => (
                   <div key={run.id} className="task-group">
                     <div className="task-group-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                        <ChevronDown size={16} />
-                        <span>{run.name}</span>
-                      </div>
+                      <span>{run.name}</span>
                       <div style={{ display: 'flex', gap: '4px' }}>
-                        <button 
-                          className="btn btn-icon" 
-                          style={{ padding: '2px', color: 'var(--text-muted)' }}
-                          title="Edit Yield Amount"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingRunId(run.id);
-                            setEditRunInputAmount(run.inputAmount || '');
-                            setEditRunMultiInputAmount(run.multiInputAmount || {});
-                            setIsEditRunModalOpen(true);
-                          }}
-                        >
-                          <Edit2 size={14} />
-                        </button>
                         <button 
                           className="btn btn-icon" 
                           style={{ padding: '2px', color: 'var(--text-muted)' }}
@@ -627,15 +951,9 @@ export default function App() {
                         </button>
                       </div>
                     </div>
-                    {run.generatedTasks.length === 0 ? (
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', paddingLeft: '1.5rem' }}>All tasks scheduled!</div>
-                    ) : (
-                      <div className="task-group-list">
-                        {run.generatedTasks.map(task => (
-                          <DraggableGeneratedTask key={task.id} task={task} />
-                        ))}
-                      </div>
-                    )}
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      {scheduledTasks.filter(t => t.runId === run.id).length} process blocks on the calendar
+                    </div>
                   </div>
                 ))}
               </div>
@@ -694,7 +1012,8 @@ export default function App() {
                         employees={employees} 
                         onClick={(task) => {
                           setAssigningTask(task);
-                          setSelectedEmployee(task.employeeId || '');
+                          setSelectedEmployees(task.employeeIds || (task.employeeId ? [task.employeeId] : []));
+                          setSelectedRunAmount(String(task.inputAmount || task.buckets || activeRuns.find(run => run.id === task.runId)?.inputAmount || 1));
                           setIsAssignModalOpen(true);
                         }}
                       />
@@ -714,140 +1033,49 @@ export default function App() {
           />
         )}
 
-        {/* Modals */}
-        {isNewRunModalOpen && (
-          <div className="modal-overlay">
-            <div className="modal-content">
-              <h3>Start Production Run</h3>
-              <form onSubmit={handleAddRun}>
-                <div className="form-group">
-                  <label>Production Group</label>
-                  <select value={selectedRunTemplate} onChange={e => {
-                    setSelectedRunTemplate(e.target.value);
-                    const tmpl = runTemplates.find(rt => rt.id === e.target.value);
-                    if (tmpl && tmpl.inputType === 'multiple') {
-                      const initialMulti = {};
-                      tmpl.tasks.forEach(tId => initialMulti[tId] = '1');
-                      setRunMultiInputAmount(initialMulti);
-                    }
-                  }}>
-                    {runTemplates.map(rt => (
-                      <option key={rt.id} value={rt.id}>{rt.name}</option>
-                    ))}
-                  </select>
-                </div>
-                {runTemplates.find(rt => rt.id === selectedRunTemplate)?.inputType === 'multiple' ? (
-                  runTemplates.find(rt => rt.id === selectedRunTemplate).tasks.map(taskId => {
-                    const task = taskTemplates.find(t => t.id === taskId);
-                    return (
-                      <div key={taskId} className="form-group" style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                        <label style={{ margin: 0, width: '150px' }}>{task.name} ({task.unitName})</label>
-                        <input 
-                          type="number" 
-                          min="1" 
-                          value={runMultiInputAmount[taskId] || '1'} 
-                          onChange={e => setRunMultiInputAmount(prev => ({ ...prev, [taskId]: e.target.value }))}
-                          required
-                          style={{ flex: 1 }}
-                        />
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="form-group">
-                    <label>Yield Amount ({runTemplates.find(rt => rt.id === selectedRunTemplate)?.inputUnit})</label>
-                    <input 
-                      type="number" 
-                      min="1" 
-                      value={runInputAmount} 
-                      onChange={e => setRunInputAmount(e.target.value)}
-                      required
-                    />
-                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                      This equals {(Number(runInputAmount) || 0) * (runTemplates.find(rt => rt.id === selectedRunTemplate)?.bucketsPerInputUnit || 1)} buckets.
-                    </p>
-                  </div>
-                )}
-                <div className="modal-actions">
-                  <button type="button" className="btn btn-secondary" onClick={() => setIsNewRunModalOpen(false)}>Cancel</button>
-                  <button type="submit" className="btn btn-primary">Create Run</button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {isEditRunModalOpen && editingRunId && (
-          <div className="modal-overlay">
-            <div className="modal-content">
-              <h3>Edit Yield Amount</h3>
-              <form onSubmit={handleEditRunSubmit}>
-                {runTemplates.find(rt => rt.id === activeRuns.find(r => r.id === editingRunId)?.templateId)?.inputType === 'multiple' ? (
-                  runTemplates.find(rt => rt.id === activeRuns.find(r => r.id === editingRunId)?.templateId).tasks.map(taskId => {
-                    const task = taskTemplates.find(t => t.id === taskId);
-                    return (
-                      <div key={taskId} className="form-group" style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                        <label style={{ margin: 0, width: '150px' }}>{task.name} ({task.unitName})</label>
-                        <input 
-                          type="number" 
-                          min="1" 
-                          value={editRunMultiInputAmount[taskId] || '1'} 
-                          onChange={e => setEditRunMultiInputAmount(prev => ({ ...prev, [taskId]: e.target.value }))}
-                          required
-                          style={{ flex: 1 }}
-                        />
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="form-group">
-                    <label>
-                      New Yield Amount 
-                      ({runTemplates.find(rt => rt.id === activeRuns.find(r => r.id === editingRunId)?.templateId)?.inputUnit})
-                    </label>
-                    <input 
-                      type="number" 
-                      min="1" 
-                      value={editRunInputAmount} 
-                      onChange={e => setEditRunInputAmount(e.target.value)}
-                      required
-                    />
-                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                      This equals {(Number(editRunInputAmount) || 0) * (runTemplates.find(rt => rt.id === activeRuns.find(r => r.id === editingRunId)?.templateId)?.bucketsPerInputUnit || 1)} buckets.
-                    </p>
-                  </div>
-                )}
-                <div className="modal-actions">
-                  <button type="button" className="btn btn-secondary" onClick={() => setIsEditRunModalOpen(false)}>Cancel</button>
-                  <button type="submit" className="btn btn-primary">Update Run</button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
         {isAssignModalOpen && assigningTask && (
           <div className="modal-overlay">
             <div className="modal-content">
               <h3>Edit Schedule</h3>
-              <p style={{ marginBottom: '1rem', color: 'var(--text-muted)' }}>{assigningTask.name} ({assigningTask.duration}m)</p>
+              <p style={{ marginBottom: '1rem', color: 'var(--text-muted)' }}>{assigningTask.name} ({formatDuration(assigningTask.duration)})</p>
               <form onSubmit={handleAssignSubmit}>
                 <div className="form-group">
-                  <label>Employee</label>
-                  <select value={selectedEmployee} onChange={e => setSelectedEmployee(e.target.value)}>
-                    <option value="">-- Unassigned --</option>
+                  <label>Run amount (updates this whole run)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={selectedRunAmount}
+                    onChange={e => setSelectedRunAmount(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>People assigned to this block</label>
+                  <div className="checkbox-list">
                     {employees.map(emp => {
                       const skill = emp.skills[assigningTask.templateId] || 'untrained';
                       let skillLabel = '';
                       if (skill === 'expert') skillLabel = ' (Expert)';
                       if (skill === 'beginner') skillLabel = ' (Beginner)';
-                      if (skill === 'untrained') skillLabel = ' (Untrained ⚠️)';
+                      if (skill === 'untrained') skillLabel = ' (Untrained)';
                       
                       return (
-                        <option key={emp.id} value={emp.id}>{emp.name}{skillLabel}</option>
+                        <label key={emp.id} className="checkbox-row">
+                          <input
+                            type="checkbox"
+                            checked={selectedEmployees.includes(emp.id)}
+                            onChange={e => {
+                              setSelectedEmployees(prev => e.target.checked
+                                ? [...prev, emp.id]
+                                : prev.filter(id => id !== emp.id)
+                              );
+                            }}
+                          />
+                          <span>{emp.name}{skillLabel}</span>
+                        </label>
                       );
                     })}
-                  </select>
+                  </div>
                 </div>
                 <div className="modal-actions" style={{ justifyContent: 'space-between' }}>
                   <button type="button" className="btn" style={{ backgroundColor: '#fee2e2', color: '#991b1b' }} onClick={handleDeleteTask}>Remove from Schedule</button>
@@ -864,14 +1092,25 @@ export default function App() {
       
       <DragOverlay>
         {activeDragItem ? (
-          activeDragItem.data.current?.type === 'generated' ? (
-            <div className={`task-template task-${activeDragItem.data.current.task.groupId}`} style={{ margin: 0, opacity: 0.9, width: '280px', pointerEvents: 'none' }}>
+          activeDragItem.data.current?.type === 'run-template' ? (
+            <div className={`task-template task-${activeDragItem.data.current.runTemplate.groupId}`} style={{ margin: 0, opacity: 0.9, width: '280px', pointerEvents: 'none' }}>
               <GripVertical size={16} className="drag-handle-icon" />
               <div className="task-content-wrapper">
-                <div className="task-title" style={{ fontSize: '0.875rem' }}>{activeDragItem.data.current.task.name}</div>
+                <div className="task-title" style={{ fontSize: '0.875rem' }}>{activeDragItem.data.current.runTemplate.name}</div>
                 <div className="task-meta">
                   <Clock size={12} />
-                  {activeDragItem.data.current.task.duration}m
+                  Drop to split into process blocks
+                </div>
+              </div>
+            </div>
+          ) : activeDragItem.data.current?.type === 'task-template' ? (
+            <div className={`task-template task-${activeDragItem.data.current.taskTemplate.groupId}`} style={{ margin: 0, opacity: 0.9, width: '260px', pointerEvents: 'none' }}>
+              <GripVertical size={16} className="drag-handle-icon" />
+              <div className="task-content-wrapper">
+                <div className="task-title" style={{ fontSize: '0.875rem' }}>{activeDragItem.data.current.taskTemplate.name}</div>
+                <div className="task-meta">
+                  <Clock size={12} />
+                  {activeDragItem.data.current.inputAmount} {activeDragItem.data.current.taskTemplate.unitName}
                 </div>
               </div>
             </div>

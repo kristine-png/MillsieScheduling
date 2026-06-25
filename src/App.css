@@ -102,6 +102,30 @@
   border-color: var(--veg-border);
 }
 
+.task-packaging-prep {
+  background-color: var(--packaging-bg);
+  color: var(--packaging-text);
+  border-color: var(--packaging-border);
+}
+
+.task-dip-processing {
+  background-color: var(--dip-process-bg);
+  color: var(--dip-process-text);
+  border-color: var(--dip-process-border);
+}
+
+.task-cheese-processing {
+  background-color: var(--cheese-bg);
+  color: var(--cheese-text);
+  border-color: var(--cheese-border);
+}
+
+.task-sanitation {
+  background-color: var(--sanitation-bg);
+  color: var(--sanitation-text);
+  border-color: var(--sanitation-border);
+}
+
 /* Task Groups in Sidebar */
 .task-group {
   margin-bottom: 1.5rem;
@@ -120,6 +144,181 @@
 .task-group-list {
   display: flex;
   flex-direction: column;
+}
+
+.run-setup-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.run-setup-card .task-template {
+  cursor: pointer;
+  margin-bottom: 0;
+}
+
+.run-folder-button {
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+}
+
+.process-folder-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.process-setup-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.process-task-card {
+  cursor: grab !important;
+  padding: 0.65rem 0.75rem;
+}
+
+.process-setup-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.45rem;
+  padding-left: 0.25rem;
+}
+
+.process-setup-controls select {
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: white;
+  font-family: inherit;
+  font-size: 0.8rem;
+}
+
+.process-amount-field {
+  margin-bottom: 0;
+}
+
+.process-amount-field input {
+  width: 104px;
+}
+
+.run-drag-handle {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  flex-shrink: 0;
+}
+
+.run-drag-handle:hover {
+  background: rgba(79, 70, 229, 0.08);
+}
+
+.run-drag-handle:active {
+  cursor: grabbing;
+}
+
+.run-expand-icon {
+  margin-left: auto;
+  color: var(--text-muted);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.run-expand-icon.is-expanded {
+  transform: rotate(180deg);
+}
+
+.run-setup-controls {
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: #ffffff;
+}
+
+.compact-field {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 0.75rem;
+}
+
+.compact-field input {
+  width: 92px;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+}
+
+.run-assignment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.run-assignment-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.run-assignment-name {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.run-assignment-row select {
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: white;
+  font-family: inherit;
+  font-size: 0.8rem;
+}
+
+.run-person-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.person-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.45rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: #f8fafc;
+  font-size: 0.75rem;
+  color: var(--text-main);
+}
+
+.person-pill input {
+  width: auto;
+}
+
+.person-pill:has(input:checked) {
+  border-color: var(--ferment-border);
+  background: var(--ferment-bg);
+  color: var(--ferment-text);
 }
 
 /* Main Schedule Area */
@@ -263,6 +462,42 @@
   border-color: var(--ferment-border);
 }
 
+.task-dip-mixing {
+  background-color: var(--dip-bg);
+  color: var(--dip-text);
+  border-color: var(--dip-border);
+}
+
+.task-veg-prep {
+  background-color: var(--veg-bg);
+  color: var(--veg-text);
+  border-color: var(--veg-border);
+}
+
+.task-packaging-prep {
+  background-color: var(--packaging-bg);
+  color: var(--packaging-text);
+  border-color: var(--packaging-border);
+}
+
+.task-dip-processing {
+  background-color: var(--dip-process-bg);
+  color: var(--dip-process-text);
+  border-color: var(--dip-process-border);
+}
+
+.task-cheese-processing {
+  background-color: var(--cheese-bg);
+  color: var(--cheese-text);
+  border-color: var(--cheese-border);
+}
+
+.task-sanitation {
+  background-color: var(--sanitation-bg);
+  color: var(--sanitation-text);
+  border-color: var(--sanitation-border);
+}
+
 .task-title {
   font-weight: 600;
   margin-bottom: 0.25rem;
@@ -330,6 +565,27 @@
   outline: none;
   border-color: var(--primary);
   box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
+}
+
+.checkbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.checkbox-row {
+  display: flex !important;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 !important;
+  font-weight: 400 !important;
+}
+
+.checkbox-row input {
+  width: auto;
 }
 
 .modal-actions {
