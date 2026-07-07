@@ -43,13 +43,19 @@ function createInitialProcessSetups() {
   );
 }
 
-function getTaskDuration(template, amount) {
+function getDurationWorkerCount(template, employeeIds = []) {
+  if (!template?.maxPeopleAffectingDuration) return 1;
+  const assignedCount = Math.max(1, employeeIds.length || 1);
+  return Math.min(assignedCount, template.maxPeopleAffectingDuration);
+}
+
+function getTaskDuration(template, amount, employeeIds = []) {
   let duration = template.baseMinutes;
   if (template.variableMinutesPerCycle > 0) {
     const cycles = template.isBatchProcess
       ? Math.ceil(amount / template.unitsPerCycle)
       : amount / template.unitsPerCycle;
-    duration += cycles * template.variableMinutesPerCycle;
+    duration += (cycles * template.variableMinutesPerCycle) / getDurationWorkerCount(template, employeeIds);
   }
   return Math.round(duration);
 }
@@ -199,6 +205,14 @@ function getRunLayout(runTemplate, amount, flavorCount = 1) {
   };
 }
 
+function toggleEmployeeId(employeeIds = [], employeeId, maxSelections = Infinity) {
+  if (!employeeId) return employeeIds;
+  if (employeeIds.includes(employeeId)) {
+    return employeeIds.filter(id => id !== employeeId);
+  }
+  return [...employeeIds, employeeId].slice(-maxSelections);
+}
+
 // Draggable Sidebar Item (Full Run Template)
 function DraggableRunTemplate({
   runTemplate,
@@ -233,7 +247,7 @@ function DraggableRunTemplate({
   const totalConfiguredMinutes = runTemplate.tasks.reduce((sum, taskId) => {
     const template = taskTemplates.find(t => t.id === taskId);
     const taskAmount = getTaskAmountForRun(taskId, parsedAmount, parsedFlavorCount);
-    return template ? sum + getTaskDuration(template, taskAmount) : sum;
+    return template ? sum + getTaskDuration(template, taskAmount, assignments[taskId] || []) : sum;
   }, 0);
 
   return (
@@ -341,19 +355,21 @@ function DraggableProcessTemplate({
   task,
   employees,
   amount,
-  employeeId,
+  employeeIds,
   onAmountChange,
-  onEmployeeChange,
+  onEmployeeToggle,
 }) {
   const parsedAmount = Math.max(1, Number(amount) || 1);
-  const duration = getTaskDuration(task, parsedAmount);
+  const selectedEmployeeIds = employeeIds || [];
+  const maxSelections = task.maxPeopleAffectingDuration || 1;
+  const duration = getTaskDuration(task, parsedAmount, selectedEmployeeIds);
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `task-template-${task.id}`,
     data: {
       type: 'task-template',
       taskTemplate: task,
       inputAmount: parsedAmount,
-      employeeIds: employeeId ? [employeeId] : [],
+      employeeIds: selectedEmployeeIds,
     },
   });
 
@@ -387,16 +403,31 @@ function DraggableProcessTemplate({
             onChange={e => onAmountChange(e.target.value)}
           />
         </label>
-        <select
-          value={employeeId || ''}
-          onChange={e => onEmployeeChange(e.target.value)}
-          aria-label={`${task.name} person`}
-        >
-          <option value="">Unassigned</option>
-          {employees.map(emp => (
-            <option key={emp.id} value={emp.id}>{emp.name}</option>
-          ))}
-        </select>
+        {maxSelections > 1 ? (
+          <div className="mini-checkbox-list" aria-label={`${task.name} people`}>
+            {employees.map(emp => (
+              <label key={emp.id} className="mini-checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={selectedEmployeeIds.includes(emp.id)}
+                  onChange={() => onEmployeeToggle(emp.id, maxSelections)}
+                />
+                <span>{emp.name}</span>
+              </label>
+            ))}
+          </div>
+        ) : (
+          <select
+            value={selectedEmployeeIds[0] || ''}
+            onChange={e => onEmployeeToggle(e.target.value, maxSelections)}
+            aria-label={`${task.name} person`}
+          >
+            <option value="">Unassigned</option>
+            {employees.map(emp => (
+              <option key={emp.id} value={emp.id}>{emp.name}</option>
+            ))}
+          </select>
+        )}
       </div>
     </div>
   );
@@ -410,7 +441,7 @@ function ProcessFolder({
   isExpanded,
   onToggle,
   onAmountChange,
-  onEmployeeChange,
+  onEmployeeToggle,
 }) {
   return (
     <div className="run-setup-card">
@@ -442,9 +473,9 @@ function ProcessFolder({
                 task={task}
                 employees={employees}
                 amount={setup.amount}
-                employeeId={setup.employeeIds?.[0] || ''}
+                employeeIds={setup.employeeIds || []}
                 onAmountChange={amount => onAmountChange(taskId, amount)}
-                onEmployeeChange={employeeId => onEmployeeChange(taskId, employeeId)}
+                onEmployeeToggle={(employeeId, maxSelections) => onEmployeeToggle(taskId, employeeId, maxSelections)}
               />
             );
           })}
@@ -802,14 +833,21 @@ export default function App() {
     }));
   };
 
-  const handleProcessEmployeeChange = (taskId, employeeId) => {
-    setProcessSetups(prev => ({
-      ...prev,
-      [taskId]: {
-        ...(prev[taskId] || { amount: '1' }),
-        employeeIds: employeeId ? [employeeId] : [],
-      },
-    }));
+  const handleProcessEmployeeToggle = (taskId, employeeId, maxSelections = 1) => {
+    setProcessSetups(prev => {
+      const setup = prev[taskId] || { amount: '1', employeeIds: [] };
+      const employeeIds = maxSelections > 1
+        ? toggleEmployeeId(setup.employeeIds || [], employeeId, maxSelections)
+        : (employeeId ? [employeeId] : []);
+
+      return {
+        ...prev,
+        [taskId]: {
+          ...setup,
+          employeeIds,
+        },
+      };
+    });
   };
 
   const sensors = useSensors(
@@ -875,7 +913,8 @@ export default function App() {
           if (taskAmount <= 0) return null;
 
           const taskStart = addMinutesToStart(startHour, startMinute, layoutOffsets[taskId] || 0);
-          const duration = getTaskDuration(template, taskAmount);
+          const employeeIds = assignments[template.id] || (defaultEmployeeId ? [defaultEmployeeId] : []);
+          const duration = getTaskDuration(template, taskAmount, employeeIds);
 
           return {
             id: uuidv4(),
@@ -887,7 +926,7 @@ export default function App() {
             startHour: taskStart.startHour,
             startMinute: taskStart.startMinute,
             duration,
-            employeeIds: assignments[template.id] || (defaultEmployeeId ? [defaultEmployeeId] : []),
+            employeeIds,
             inputAmount: taskAmount,
             inputUnit: template.unitName,
             buckets: taskAmount,
@@ -913,7 +952,8 @@ export default function App() {
         const runId = uuidv4();
         const inputAmount = Math.max(1, Number(active.data.current.inputAmount) || 1);
         const inputUnit = template.unitName;
-        const duration = getTaskDuration(template, inputAmount);
+        const employeeIds = active.data.current.employeeIds || [];
+        const duration = getTaskDuration(template, inputAmount, employeeIds);
 
         setScheduledTasks(prev => [...prev, {
           id: uuidv4(),
@@ -925,7 +965,7 @@ export default function App() {
           startHour,
           startMinute,
           duration,
-          employeeIds: active.data.current.employeeIds || [],
+          employeeIds,
           inputAmount,
           inputUnit,
           buckets: inputAmount,
@@ -990,7 +1030,8 @@ export default function App() {
       runTasks.forEach(t => {
         const template = taskTemplates.find(tt => tt.id === t.templateId);
         const taskAmount = getTaskAmountForRun(t.templateId, inputAmount, flavorCount);
-        const duration = template ? getTaskDuration(template, taskAmount) : t.duration;
+        const employeeIds = t.id === assigningTask.id ? selectedEmployees : (t.employeeIds || []);
+        const duration = template ? getTaskDuration(template, taskAmount, employeeIds) : t.duration;
         const taskStart = firstTask
           ? addMinutesToStart(firstTask.startHour, firstTask.startMinute || 0, layoutOffsets[t.templateId] || 0)
           : { startHour: t.startHour, startMinute: t.startMinute || 0 };
@@ -1004,7 +1045,7 @@ export default function App() {
           inputUnit: template?.unitName || inputUnit,
           buckets: taskAmount,
           duration,
-          employeeIds: t.id === assigningTask.id ? selectedEmployees : (t.employeeIds || []),
+          employeeIds,
         });
       });
 
@@ -1097,7 +1138,7 @@ export default function App() {
                         isExpanded={expandedRunId === runTemplate.id}
                         onToggle={() => setExpandedRunId(prev => prev === runTemplate.id ? null : runTemplate.id)}
                         onAmountChange={handleProcessAmountChange}
-                        onEmployeeChange={handleProcessEmployeeChange}
+                        onEmployeeToggle={handleProcessEmployeeToggle}
                       />
                     );
                   }
@@ -1277,6 +1318,10 @@ export default function App() {
                   <div className="checkbox-list">
                     {employees.map(emp => {
                       const skill = emp.skills[assigningTask.templateId] || 'untrained';
+                      const assignmentTemplate = taskTemplates.find(t => t.id === assigningTask.templateId);
+                      const maxSelections = assignmentTemplate?.maxPeopleAffectingDuration || Infinity;
+                      const isChecked = selectedEmployees.includes(emp.id);
+                      const isDisabled = !isChecked && selectedEmployees.length >= maxSelections;
                       let skillLabel = '';
                       if (skill === 'expert') skillLabel = ' (Expert)';
                       if (skill === 'beginner') skillLabel = ' (Beginner)';
@@ -1286,10 +1331,11 @@ export default function App() {
                         <label key={emp.id} className="checkbox-row">
                           <input
                             type="checkbox"
-                            checked={selectedEmployees.includes(emp.id)}
+                            checked={isChecked}
+                            disabled={isDisabled}
                             onChange={e => {
                               setSelectedEmployees(prev => e.target.checked
-                                ? [...prev, emp.id]
+                                ? [...prev, emp.id].slice(-maxSelections)
                                 : prev.filter(id => id !== emp.id)
                               );
                             }}

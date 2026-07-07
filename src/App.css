@@ -198,6 +198,28 @@
   font-size: 0.8rem;
 }
 
+.mini-checkbox-list {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: white;
+}
+
+.mini-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+  color: var(--text-main);
+}
+
+.mini-checkbox-row input {
+  width: 16px;
+  height: 16px;
+}
+
 .process-amount-field {
   margin-bottom: 0;
 }
