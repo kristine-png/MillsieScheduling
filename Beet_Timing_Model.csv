@@ -1,0 +1,8 @@
+Bag count,Fixed setup/roast/rest/cool/cleanup minutes,Variable labor minutes per bag,Total planned minutes,Total planned hours,Notes
+1,210,45,255,4.25,"Roast/rest/cool is fixed for one oven load; labor scales with washing, panning, peeling, portioning, labeling, and added cleanup."
+2,210,45,300,5.00,"SOP expectation says peeling and portioning is 45-60 minutes for 2 beet batches with 2 people; this planning model uses a blended 45 minutes per raw bag."
+4,210,45,390,6.50,"Use one oven-load fixed time if the oven can hold all pans; add another fixed roast/rest/cool block if a second oven round is needed."
+8,210,45,570,9.50,"Large runs are mostly limited by peeling and portioning, not roasting."
+12,210,45,750,12.50,"Plan extra people on peeling/portioning if the elapsed day is too long."
+16,210,45,930,15.50,"If sink, pan, or cart space is tight, stage washing/panning while the first pans are roasting."
+20,210,45,1110,18.50,"Roasting should not be multiplied by bag count unless oven capacity forces multiple oven rounds."
