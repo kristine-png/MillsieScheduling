@@ -47,6 +47,7 @@ function createInitialRunSetups() {
 
 function createInitialProcessSetups() {
   const processFolderRunIds = new Set([
+    'run-dip-mixing',
     'run-veg-prep',
     'run-packaging-prep',
     'run-cheese-processing',
@@ -1295,7 +1296,8 @@ export default function App() {
                 {runTemplates.map(runTemplate => {
                   const runSetup = runSetups[runTemplate.id] || { amount: '1', assignments: {} };
                   if (
-                    runTemplate.id === 'run-veg-prep'
+                    runTemplate.id === 'run-dip-mixing'
+                    || runTemplate.id === 'run-veg-prep'
                     || runTemplate.id === 'run-packaging-prep'
                     || runTemplate.id === 'run-cheese-processing'
                   ) {
