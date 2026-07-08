@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { DndContext, useDraggable, useDroppable, pointerWithin, useSensors, useSensor, PointerSensor, DragOverlay } from '@dnd-kit/core';
 import { initialEmployees, taskTemplates, runTemplates, hoursOfDay } from './data';
 import { Clock, GripVertical, AlertCircle, Users, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Printer, Trash2, StickyNote } from 'lucide-react';
@@ -30,6 +30,22 @@ const MIXING_CHANGEOVER_TASK_IDS = new Set([
   'task-cheese-mixing',
   'task-dip-mixing',
 ]);
+const DAILY_DUTY_BLOCKS = [
+  {
+    idPrefix: 'opening-duties',
+    taskId: 'task-opening-duties',
+    startHour: 7,
+    startMinute: 0,
+    notes: 'Sinks, tables, sanitizer bottles, dry dishes, clean cloths, high-touch surfaces, carts.',
+  },
+  {
+    idPrefix: 'closing-duties',
+    taskId: 'task-closing-duties',
+    startHour: 17,
+    startMinute: 15,
+    notes: 'Post-op cleaning plus garbage, recycling, cardboard, organics, and general waste.',
+  },
+];
 
 function createInitialRunSetups() {
   return Object.fromEntries(
@@ -58,6 +74,29 @@ function createInitialProcessSetups() {
   return Object.fromEntries(
     processFolderTasks.map(taskId => [taskId, { amount: '1', flavorCount: '1', employeeIds: [] }])
   );
+}
+
+function createDailyDutyTask(dayId, duty) {
+  const template = taskTemplates.find(task => task.id === duty.taskId);
+  if (!template) return null;
+
+  return {
+    id: `${duty.idPrefix}-${dayId}`,
+    runId: `${duty.idPrefix}-run-${dayId}`,
+    templateId: template.id,
+    groupId: template.groupId,
+    name: template.name,
+    dateStr: dayId,
+    startHour: duty.startHour,
+    startMinute: duty.startMinute,
+    duration: getTaskDuration(template, 1),
+    employeeIds: [],
+    inputAmount: 1,
+    inputUnit: template.unitName,
+    buckets: 1,
+    notes: duty.notes,
+    isAutomaticDaily: true,
+  };
 }
 
 function getDurationWorkerCount(template, employeeIds = []) {
@@ -147,6 +186,7 @@ const singularUnits = {
   cases: 'case',
   changeovers: 'changeover',
   containers: 'container',
+  duties: 'duty',
   inspections: 'inspection',
   lids: 'lid',
   pans: 'pan',
@@ -751,6 +791,7 @@ function PrintWeekSchedule({
   };
 
   const getRunName = (task) => {
+    if (task.isAutomaticDaily) return 'Daily duties';
     const run = activeRuns.find(item => item.id === task.runId);
     return run?.name || 'Single process';
   };
@@ -927,7 +968,20 @@ export default function App() {
 
   const [activeDragItem, setActiveDragItem] = useState(null);
   const [dragTimeHint, setDragTimeHint] = useState(null);
-  const visibleWeekTaskCount = scheduledTasks.filter(task => weekDayIds.has(task.dateStr)).length;
+  const visibleWeekTaskCount = scheduledTasks.filter(task => weekDayIds.has(task.dateStr) && !task.isAutomaticDaily).length;
+
+  useEffect(() => {
+    setScheduledTasks(prev => {
+      const existingIds = new Set(prev.map(task => task.id));
+      const missingDailyTasks = weekDays.flatMap(day => (
+        DAILY_DUTY_BLOCKS
+          .map(duty => createDailyDutyTask(day.id, duty))
+          .filter(task => task && !existingIds.has(task.id))
+      ));
+
+      return missingDailyTasks.length > 0 ? [...prev, ...missingDailyTasks] : prev;
+    });
+  }, [weekDays]);
 
   const handleRunSetupAmountChange = (runTemplateId, amount) => {
     setRunSetups(prev => ({
@@ -1238,6 +1292,7 @@ export default function App() {
 
   const handleDeleteTask = () => {
     if (!assigningTask) return;
+    if (assigningTask.isAutomaticDaily) return;
 
     setScheduledTasks(prev => prev.filter(t => t.id !== assigningTask.id));
     setActiveRuns(prev => prev.filter(run => (
@@ -1252,7 +1307,7 @@ export default function App() {
     if (visibleWeekTaskCount === 0) return;
     if (!window.confirm(`Clear all ${visibleWeekTaskCount} scheduled process blocks from this week?`)) return;
 
-    const remainingTasks = scheduledTasks.filter(task => !weekDayIds.has(task.dateStr));
+    const remainingTasks = scheduledTasks.filter(task => !weekDayIds.has(task.dateStr) || task.isAutomaticDaily);
     const remainingRunIds = new Set(remainingTasks.map(task => task.runId));
 
     setScheduledTasks(remainingTasks);
@@ -1544,7 +1599,11 @@ export default function App() {
                   />
                 </div>
                 <div className="modal-actions" style={{ justifyContent: 'space-between' }}>
-                  <button type="button" className="btn" style={{ backgroundColor: '#fee2e2', color: '#991b1b' }} onClick={handleDeleteTask}>Remove from Schedule</button>
+                  {assigningTask.isAutomaticDaily ? (
+                    <span />
+                  ) : (
+                    <button type="button" className="btn" style={{ backgroundColor: '#fee2e2', color: '#991b1b' }} onClick={handleDeleteTask}>Remove from Schedule</button>
+                  )}
                   <div style={{ display: 'flex', gap: '1rem' }}>
                     <button type="button" className="btn btn-secondary" onClick={() => setIsAssignModalOpen(false)}>Cancel</button>
                     <button type="submit" className="btn btn-primary">Save Assignment</button>

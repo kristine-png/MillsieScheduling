@@ -1,10 +1,32 @@
 export const initialEmployees = [
-  { id: 'emp-1', name: 'Alice', skills: { 'task-sanitation': 'expert', 'task-boiling': 'beginner', 'task-cleanup': 'expert' } },
-  { id: 'emp-2', name: 'Bob', skills: { 'task-sanitation': 'beginner', 'task-boiling': 'expert', 'task-cleanup': 'expert' } },
-  { id: 'emp-3', name: 'Charlie', skills: { 'task-sanitation': 'untrained', 'task-boiling': 'untrained', 'task-cleanup': 'beginner' } },
+  { id: 'emp-1', name: 'Alice', skills: { 'task-sanitation': 'expert', 'task-boiling': 'beginner', 'task-cleanup': 'expert', 'task-opening-duties': 'expert', 'task-closing-duties': 'expert' } },
+  { id: 'emp-2', name: 'Bob', skills: { 'task-sanitation': 'beginner', 'task-boiling': 'expert', 'task-cleanup': 'expert', 'task-opening-duties': 'beginner', 'task-closing-duties': 'expert' } },
+  { id: 'emp-3', name: 'Charlie', skills: { 'task-sanitation': 'untrained', 'task-boiling': 'untrained', 'task-cleanup': 'beginner', 'task-opening-duties': 'beginner', 'task-closing-duties': 'beginner' } },
 ];
 
 export const taskTemplates = [
+  {
+    id: 'task-opening-duties',
+    groupId: 'sanitation',
+    name: 'Opening Duties',
+    colorVar: '--sanitation',
+    baseMinutes: 30,
+    variableMinutesPerCycle: 0,
+    unitsPerCycle: 1,
+    unitName: 'duties',
+    isBatchProcess: false,
+  },
+  {
+    id: 'task-closing-duties',
+    groupId: 'sanitation',
+    name: 'Closing Duties',
+    colorVar: '--sanitation',
+    baseMinutes: 45,
+    variableMinutesPerCycle: 0,
+    unitsPerCycle: 1,
+    unitName: 'duties',
+    isBatchProcess: false,
+  },
   {
     id: 'task-sanitation',
     groupId: 'ferment-prep',
