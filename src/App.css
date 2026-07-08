@@ -220,6 +220,40 @@
   height: 16px;
 }
 
+.run-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.run-toggle-row input {
+  width: 16px;
+  height: 16px;
+}
+
+.role-assignment-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.role-assignment-field {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.role-assignment-field span {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.role-assignment-field select {
+  width: 100%;
+}
+
 .process-amount-field {
   margin-bottom: 0;
 }

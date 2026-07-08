@@ -25,6 +25,7 @@ const DIP_PROCESSING_LINE_TASK_IDS = new Set([
   'task-dip-sleeves-boxes',
 ]);
 const DIP_PROCESSING_CHANGEOVER_MINUTES = 15;
+const CHEESE_PROCESSING_CHANGEOVER_MINUTES = 20;
 
 function createInitialRunSetups() {
   return Object.fromEntries(
@@ -33,6 +34,7 @@ function createInitialRunSetups() {
       {
         amount: '1',
         flavorCount: '1',
+        includeDipping: true,
         defaultEmployeeId: '',
         assignments: runTemplate.id === 'run-fermentation' ? defaultFermentationAssignments : {},
       },
@@ -52,7 +54,7 @@ function createInitialProcessSetups() {
 
 function getDurationWorkerCount(template, employeeIds = []) {
   if (!template?.maxPeopleAffectingDuration) return 1;
-  const assignedCount = Math.max(1, employeeIds.length || 1);
+  const assignedCount = Math.max(1, employeeIds.filter(Boolean).length || 1);
   return Math.min(assignedCount, template.maxPeopleAffectingDuration);
 }
 
@@ -70,6 +72,13 @@ function getTaskDuration(template, amount, employeeIds = []) {
   return Math.round(duration);
 }
 
+function getRunTaskIds(runTemplate, options = {}) {
+  if (runTemplate.id === 'run-cheese-processing' && options.includeDipping === false) {
+    return runTemplate.tasks.filter(taskId => taskId !== 'task-cheese-dipping');
+  }
+  return runTemplate.tasks;
+}
+
 function getDipProcessingElapsedDuration(amount, flavorCount = 1) {
   const stationDurations = [...DIP_PROCESSING_LINE_TASK_IDS].map(taskId => {
     const template = taskTemplates.find(t => t.id === taskId);
@@ -80,6 +89,10 @@ function getDipProcessingElapsedDuration(amount, flavorCount = 1) {
   return Math.round(productionMinutes + changeoverMinutes);
 }
 
+function getCheeseProcessingChangeoverDuration(flavorCount = 1) {
+  return Math.max(0, Number(flavorCount) - 1) * CHEESE_PROCESSING_CHANGEOVER_MINUTES;
+}
+
 function getRunTaskDuration(runTemplate, taskId, amount, flavorCount = 1, employeeIds = []) {
   if (runTemplate?.id === 'run-dip-processing' && DIP_PROCESSING_LINE_TASK_IDS.has(taskId)) {
     return getDipProcessingElapsedDuration(amount, flavorCount);
@@ -88,15 +101,21 @@ function getRunTaskDuration(runTemplate, taskId, amount, flavorCount = 1, employ
   const template = taskTemplates.find(t => t.id === taskId);
   if (!template) return 0;
   const taskAmount = getTaskAmountForRun(taskId, amount, flavorCount);
-  return getTaskDuration(template, taskAmount, employeeIds);
+  const duration = getTaskDuration(template, taskAmount, employeeIds);
+
+  if (runTemplate?.id === 'run-cheese-processing' && taskId === 'task-cheese-packing') {
+    return duration + getCheeseProcessingChangeoverDuration(flavorCount);
+  }
+
+  return duration;
 }
 
-function getRunConfiguredDuration(runTemplate, amount, flavorCount = 1, assignments = {}) {
+function getRunConfiguredDuration(runTemplate, amount, flavorCount = 1, assignments = {}, options = {}) {
   if (runTemplate.id === 'run-dip-processing') {
     return getDipProcessingElapsedDuration(amount, flavorCount);
   }
 
-  return runTemplate.tasks.reduce((sum, taskId) => {
+  return getRunTaskIds(runTemplate, options).reduce((sum, taskId) => {
     const taskAmount = getTaskAmountForRun(taskId, amount, flavorCount);
     return sum + getRunTaskDuration(runTemplate, taskId, taskAmount, flavorCount, assignments[taskId] || []);
   }, 0);
@@ -184,11 +203,16 @@ function getTaskAmountForRun(taskId, amount, flavorCount = 1) {
 function hasFlavorCountField(runTemplateId) {
   return runTemplateId === 'run-dip-processing'
     || runTemplateId === 'run-dip-mixing'
+    || runTemplateId === 'run-cheese-processing'
     || runTemplateId === 'run-cheese-mixing';
 }
 
 function hasDefaultEmployeeField(runTemplateId) {
   return runTemplateId === 'run-dip-mixing';
+}
+
+function hasDippingToggle(runTemplateId) {
+  return runTemplateId === 'run-cheese-processing';
 }
 
 function getRunDisplayName(runTemplate, inputAmount, inputUnit, fallbackName = 'Production Run') {
@@ -203,9 +227,9 @@ function addMinutesToStart(startHour, startMinute, minutesToAdd) {
   };
 }
 
-function getSequentialLayout(runTemplate, amount, flavorCount = 1) {
+function getSequentialLayout(runTemplate, amount, flavorCount = 1, options = {}) {
   let offset = 0;
-  return Object.fromEntries(runTemplate.tasks.map(taskId => {
+  return Object.fromEntries(getRunTaskIds(runTemplate, options).map(taskId => {
     const taskAmount = getTaskAmountForRun(taskId, amount, flavorCount);
     const currentOffset = offset;
     offset += getRunTaskDuration(runTemplate, taskId, taskAmount, flavorCount);
@@ -213,13 +237,13 @@ function getSequentialLayout(runTemplate, amount, flavorCount = 1) {
   }));
 }
 
-function getRunLayout(runTemplate, amount, flavorCount = 1) {
+function getRunLayout(runTemplate, amount, flavorCount = 1, options = {}) {
   if (runTemplate.id === 'run-dip-processing') {
     return Object.fromEntries(runTemplate.tasks.map(taskId => [taskId, 0]));
   }
 
   if (runTemplate.id !== 'run-fermentation') {
-    return getSequentialLayout(runTemplate, amount, flavorCount);
+    return getSequentialLayout(runTemplate, amount, flavorCount, options);
   }
 
   const durationByTaskId = Object.fromEntries(
@@ -264,17 +288,20 @@ function DraggableRunTemplate({
   employees,
   amount,
   flavorCount,
+  includeDipping,
   defaultEmployeeId,
   assignments,
   isExpanded,
   onToggle,
   onAmountChange,
   onFlavorCountChange,
+  onIncludeDippingChange,
   onDefaultEmployeeChange,
   onAssignmentChange,
 }) {
   const parsedAmount = Math.max(1, Number(amount) || 1);
   const parsedFlavorCount = Math.max(1, Number(flavorCount) || 1);
+  const runOptions = { includeDipping };
   const changeovers = Math.max(0, parsedFlavorCount - 1);
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `run-template-${runTemplate.id}`,
@@ -283,6 +310,7 @@ function DraggableRunTemplate({
       runTemplate,
       inputAmount: parsedAmount,
       flavorCount: parsedFlavorCount,
+      includeDipping,
       defaultEmployeeId,
       assignments,
     },
@@ -292,7 +320,8 @@ function DraggableRunTemplate({
     runTemplate,
     parsedAmount,
     parsedFlavorCount,
-    assignments
+    assignments,
+    runOptions
   );
   const durationLabel = runTemplate.id === 'run-dip-processing' ? 'line time' : 'total work';
 
@@ -344,6 +373,17 @@ function DraggableRunTemplate({
           </label>
         )}
 
+        {hasDippingToggle(runTemplate.id) && (
+          <label className="run-toggle-row">
+            <input
+              type="checkbox"
+              checked={includeDipping !== false}
+              onChange={e => onIncludeDippingChange(e.target.checked)}
+            />
+            <span>Includes dipping</span>
+          </label>
+        )}
+
         {hasDefaultEmployeeField(runTemplate.id) && (
           <div className="run-assignment-row">
             <label className="run-assignment-name" htmlFor={`${runTemplate.id}-default-employee`}>Main employee</label>
@@ -361,32 +401,70 @@ function DraggableRunTemplate({
         )}
 
         <div className="run-assignment-list">
-          {runTemplate.tasks.map(taskId => {
+          {getRunTaskIds(runTemplate, runOptions).map(taskId => {
             const task = taskTemplates.find(t => t.id === taskId);
             if (!task) return null;
-            const overrideEmployeeId = (assignments[taskId] || [])[0] || '';
+            const selectedEmployeeIds = assignments[taskId] || [];
+            const overrideEmployeeId = selectedEmployeeIds[0] || '';
             const defaultEmployee = employees.find(emp => emp.id === defaultEmployeeId);
             const defaultOptionLabel = defaultEmployee
               ? `Use main employee (${defaultEmployee.name})`
               : 'Use main employee';
+            const maxSelections = task.maxPeopleAffectingDuration || 1;
 
             return (
               <div key={taskId} className="run-assignment-row">
                 <label className="run-assignment-name" htmlFor={`${runTemplate.id}-${taskId}-employee`}>{task.name}</label>
-                <select
-                  id={`${runTemplate.id}-${taskId}-employee`}
-                  value={overrideEmployeeId}
-                  onChange={e => onAssignmentChange(taskId, e.target.value)}
-                >
-                  {hasDefaultEmployeeField(runTemplate.id) ? (
-                    <option value="">{defaultOptionLabel}</option>
-                  ) : (
-                    <option value="">Unassigned</option>
-                  )}
-                  {employees.map(emp => (
-                    <option key={emp.id} value={emp.id}>{emp.name}</option>
-                  ))}
-                </select>
+                {task.assignmentRoles ? (
+                  <div className="role-assignment-list">
+                    {task.assignmentRoles.map((role, roleIndex) => (
+                      <label key={role} className="role-assignment-field">
+                        <span>{role}</span>
+                        <select
+                          value={selectedEmployeeIds[roleIndex] || ''}
+                          onChange={e => {
+                            const nextEmployeeIds = [...selectedEmployeeIds];
+                            nextEmployeeIds[roleIndex] = e.target.value;
+                            onAssignmentChange(taskId, nextEmployeeIds);
+                          }}
+                        >
+                          <option value="">Unassigned</option>
+                          {employees.map(emp => (
+                            <option key={emp.id} value={emp.id}>{emp.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                ) : maxSelections > 1 ? (
+                  <div className="mini-checkbox-list" aria-label={`${task.name} people`}>
+                    {employees.map(emp => (
+                      <label key={emp.id} className="mini-checkbox-row">
+                        <input
+                          type="checkbox"
+                          checked={selectedEmployeeIds.includes(emp.id)}
+                          onChange={() => onAssignmentChange(taskId, toggleEmployeeId(selectedEmployeeIds, emp.id, maxSelections))}
+                        />
+                        <span>{emp.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <select
+                    id={`${runTemplate.id}-${taskId}-employee`}
+                    value={overrideEmployeeId}
+                    onChange={e => onAssignmentChange(taskId, e.target.value)}
+                  >
+                    {hasDefaultEmployeeField(runTemplate.id) ? (
+                      <option value="">{defaultOptionLabel}</option>
+                    ) : (
+                      <option value="">Unassigned</option>
+                    )}
+                    {employees.map(emp => (
+                      <option key={emp.id} value={emp.id}>{emp.name}</option>
+                    ))}
+                  </select>
+                )}
               </div>
             );
           })}
@@ -843,6 +921,16 @@ export default function App() {
     }));
   };
 
+  const handleRunSetupIncludeDippingChange = (runTemplateId, includeDipping) => {
+    setRunSetups(prev => ({
+      ...prev,
+      [runTemplateId]: {
+        ...(prev[runTemplateId] || { amount: '1', assignments: {} }),
+        includeDipping,
+      },
+    }));
+  };
+
   const handleRunSetupDefaultEmployeeChange = (runTemplateId, defaultEmployeeId) => {
     setRunSetups(prev => ({
       ...prev,
@@ -853,16 +941,19 @@ export default function App() {
     }));
   };
 
-  const handleRunSetupAssignmentChange = (runTemplateId, taskId, employeeId) => {
+  const handleRunSetupAssignmentChange = (runTemplateId, taskId, employeeSelection) => {
     setRunSetups(prev => {
       const runSetup = prev[runTemplateId] || { amount: '1', assignments: {} };
+      const employeeIds = Array.isArray(employeeSelection)
+        ? employeeSelection
+        : (employeeSelection ? [employeeSelection] : []);
       return {
         ...prev,
         [runTemplateId]: {
           ...runSetup,
           assignments: {
             ...runSetup.assignments,
-            [taskId]: employeeId ? [employeeId] : [],
+            [taskId]: employeeIds,
           },
         },
       };
@@ -947,11 +1038,13 @@ export default function App() {
         const runId = uuidv4();
         const inputAmount = Math.max(1, Number(active.data.current.inputAmount) || 1);
         const flavorCount = Math.max(1, Number(active.data.current.flavorCount) || 1);
+        const includeDipping = active.data.current.includeDipping !== false;
+        const runOptions = { includeDipping };
         const defaultEmployeeId = active.data.current.defaultEmployeeId || '';
         const assignments = active.data.current.assignments || {};
-        const layoutOffsets = getRunLayout(runTemplate, inputAmount, flavorCount);
+        const layoutOffsets = getRunLayout(runTemplate, inputAmount, flavorCount, runOptions);
 
-        const newTasks = runTemplate.tasks.map(taskId => {
+        const newTasks = getRunTaskIds(runTemplate, runOptions).map(taskId => {
           const template = taskTemplates.find(t => t.id === taskId);
           if (!template) return null;
 
@@ -985,6 +1078,7 @@ export default function App() {
           templateId: runTemplate.id,
           inputAmount,
           flavorCount,
+          includeDipping,
           defaultEmployeeId,
           name: getRunDisplayName(runTemplate, inputAmount, runTemplate.inputUnit),
           groupId: runTemplate.groupId,
@@ -1071,7 +1165,8 @@ export default function App() {
       const firstTask = runTasks[0];
       const updates = new Map();
       const flavorCount = activeRun?.flavorCount || 1;
-      const layoutOffsets = runTemplate ? getRunLayout(runTemplate, inputAmount, flavorCount) : {};
+      const runOptions = { includeDipping: activeRun?.includeDipping !== false };
+      const layoutOffsets = runTemplate ? getRunLayout(runTemplate, inputAmount, flavorCount, runOptions) : {};
 
       runTasks.forEach(t => {
         const template = taskTemplates.find(tt => tt.id === t.templateId);
@@ -1197,12 +1292,14 @@ export default function App() {
                       employees={employees}
                       amount={runSetup.amount}
                       flavorCount={runSetup.flavorCount || '1'}
+                      includeDipping={runSetup.includeDipping !== false}
                       defaultEmployeeId={runSetup.defaultEmployeeId || ''}
                       assignments={runSetup.assignments}
                       isExpanded={expandedRunId === runTemplate.id}
                       onToggle={() => setExpandedRunId(prev => prev === runTemplate.id ? null : runTemplate.id)}
                       onAmountChange={amount => handleRunSetupAmountChange(runTemplate.id, amount)}
                       onFlavorCountChange={flavorCount => handleRunSetupFlavorCountChange(runTemplate.id, flavorCount)}
+                      onIncludeDippingChange={includeDipping => handleRunSetupIncludeDippingChange(runTemplate.id, includeDipping)}
                       onDefaultEmployeeChange={employeeId => handleRunSetupDefaultEmployeeChange(runTemplate.id, employeeId)}
                       onAssignmentChange={(taskId, employeeId) => handleRunSetupAssignmentChange(runTemplate.id, taskId, employeeId)}
                     />
