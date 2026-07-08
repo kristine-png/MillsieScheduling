@@ -19,6 +19,13 @@ const defaultFermentationAssignments = {
   'task-cleanup': ['emp-1'],
 };
 
+const DIP_PROCESSING_LINE_TASK_IDS = new Set([
+  'task-dip-filling',
+  'task-dip-sealing',
+  'task-dip-sleeves-boxes',
+]);
+const DIP_PROCESSING_CHANGEOVER_MINUTES = 15;
+
 function createInitialRunSetups() {
   return Object.fromEntries(
     runTemplates.map(runTemplate => [
@@ -61,6 +68,38 @@ function getTaskDuration(template, amount, employeeIds = []) {
     duration += cycles * variableMinutes;
   }
   return Math.round(duration);
+}
+
+function getDipProcessingElapsedDuration(amount, flavorCount = 1) {
+  const stationDurations = [...DIP_PROCESSING_LINE_TASK_IDS].map(taskId => {
+    const template = taskTemplates.find(t => t.id === taskId);
+    return template ? getTaskDuration(template, amount) : 0;
+  });
+  const productionMinutes = Math.max(...stationDurations);
+  const changeoverMinutes = Math.max(0, Number(flavorCount) - 1) * DIP_PROCESSING_CHANGEOVER_MINUTES;
+  return Math.round(productionMinutes + changeoverMinutes);
+}
+
+function getRunTaskDuration(runTemplate, taskId, amount, flavorCount = 1, employeeIds = []) {
+  if (runTemplate?.id === 'run-dip-processing' && DIP_PROCESSING_LINE_TASK_IDS.has(taskId)) {
+    return getDipProcessingElapsedDuration(amount, flavorCount);
+  }
+
+  const template = taskTemplates.find(t => t.id === taskId);
+  if (!template) return 0;
+  const taskAmount = getTaskAmountForRun(taskId, amount, flavorCount);
+  return getTaskDuration(template, taskAmount, employeeIds);
+}
+
+function getRunConfiguredDuration(runTemplate, amount, flavorCount = 1, assignments = {}) {
+  if (runTemplate.id === 'run-dip-processing') {
+    return getDipProcessingElapsedDuration(amount, flavorCount);
+  }
+
+  return runTemplate.tasks.reduce((sum, taskId) => {
+    const taskAmount = getTaskAmountForRun(taskId, amount, flavorCount);
+    return sum + getRunTaskDuration(runTemplate, taskId, taskAmount, flavorCount, assignments[taskId] || []);
+  }, 0);
 }
 
 function formatDuration(minutes) {
@@ -134,8 +173,7 @@ function getDropTimeFromDrag(active, over) {
 
 function getTaskAmountForRun(taskId, amount, flavorCount = 1) {
   if (
-    taskId === 'task-dip-line-changeover'
-    || taskId === 'task-flavor-changeover'
+    taskId === 'task-flavor-changeover'
     || taskId === 'task-cheese-changeover'
   ) {
     return Math.max(0, Number(flavorCount) - 1);
@@ -168,15 +206,18 @@ function addMinutesToStart(startHour, startMinute, minutesToAdd) {
 function getSequentialLayout(runTemplate, amount, flavorCount = 1) {
   let offset = 0;
   return Object.fromEntries(runTemplate.tasks.map(taskId => {
-    const template = taskTemplates.find(t => t.id === taskId);
     const taskAmount = getTaskAmountForRun(taskId, amount, flavorCount);
     const currentOffset = offset;
-    offset += template ? getTaskDuration(template, taskAmount) : 0;
+    offset += getRunTaskDuration(runTemplate, taskId, taskAmount, flavorCount);
     return [taskId, currentOffset];
   }));
 }
 
 function getRunLayout(runTemplate, amount, flavorCount = 1) {
+  if (runTemplate.id === 'run-dip-processing') {
+    return Object.fromEntries(runTemplate.tasks.map(taskId => [taskId, 0]));
+  }
+
   if (runTemplate.id !== 'run-fermentation') {
     return getSequentialLayout(runTemplate, amount, flavorCount);
   }
@@ -247,11 +288,13 @@ function DraggableRunTemplate({
     },
   });
 
-  const totalConfiguredMinutes = runTemplate.tasks.reduce((sum, taskId) => {
-    const template = taskTemplates.find(t => t.id === taskId);
-    const taskAmount = getTaskAmountForRun(taskId, parsedAmount, parsedFlavorCount);
-    return template ? sum + getTaskDuration(template, taskAmount, assignments[taskId] || []) : sum;
-  }, 0);
+  const totalConfiguredMinutes = getRunConfiguredDuration(
+    runTemplate,
+    parsedAmount,
+    parsedFlavorCount,
+    assignments
+  );
+  const durationLabel = runTemplate.id === 'run-dip-processing' ? 'line time' : 'total work';
 
   return (
     <div className="run-setup-card">
@@ -270,7 +313,7 @@ function DraggableRunTemplate({
           <div className="task-title" style={{ fontSize: '0.875rem' }}>{runTemplate.name}</div>
           <div className="task-meta">
             <Clock size={12} />
-            {formatAmountLabel(parsedAmount, runTemplate.inputUnit)}, {formatDuration(totalConfiguredMinutes)} total work
+            {formatAmountLabel(parsedAmount, runTemplate.inputUnit)}, {formatDuration(totalConfiguredMinutes)} {durationLabel}
           </div>
         </div>
         <ChevronDown size={16} className={`run-expand-icon ${isExpanded ? 'is-expanded' : ''}`} />
@@ -917,7 +960,7 @@ export default function App() {
 
           const taskStart = addMinutesToStart(startHour, startMinute, layoutOffsets[taskId] || 0);
           const employeeIds = assignments[template.id] || (defaultEmployeeId ? [defaultEmployeeId] : []);
-          const duration = getTaskDuration(template, taskAmount, employeeIds);
+          const duration = getRunTaskDuration(runTemplate, taskId, inputAmount, flavorCount, employeeIds);
 
           return {
             id: uuidv4(),
@@ -1034,7 +1077,7 @@ export default function App() {
         const template = taskTemplates.find(tt => tt.id === t.templateId);
         const taskAmount = getTaskAmountForRun(t.templateId, inputAmount, flavorCount);
         const employeeIds = t.id === assigningTask.id ? selectedEmployees : (t.employeeIds || []);
-        const duration = template ? getTaskDuration(template, taskAmount, employeeIds) : t.duration;
+        const duration = template ? getRunTaskDuration(runTemplate, t.templateId, inputAmount, flavorCount, employeeIds) : t.duration;
         const taskStart = firstTask
           ? addMinutesToStart(firstTask.startHour, firstTask.startMinute || 0, layoutOffsets[t.templateId] || 0)
           : { startHour: t.startHour, startMinute: t.startMinute || 0 };

@@ -264,17 +264,6 @@ export const taskTemplates = [
     isBatchProcess: false,
   },
   {
-    id: 'task-dip-line-changeover',
-    groupId: 'dip-processing',
-    name: 'Dip Line Changeover',
-    colorVar: '--dip-process',
-    baseMinutes: 0,
-    variableMinutesPerCycle: 18,
-    unitsPerCycle: 1,
-    unitName: 'changeovers',
-    isBatchProcess: false,
-  },
-  {
     id: 'task-cheese-mixing',
     groupId: 'cheese-processing',
     name: 'Mix Cheese',
@@ -446,7 +435,6 @@ export const runTemplates = [
       'task-dip-filling',
       'task-dip-sealing',
       'task-dip-sleeves-boxes',
-      'task-dip-line-changeover',
     ]
   },
   {
