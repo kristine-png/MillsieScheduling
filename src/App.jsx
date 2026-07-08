@@ -25,6 +25,11 @@ const DIP_PROCESSING_LINE_TASK_IDS = new Set([
   'task-dip-sleeves-boxes',
 ]);
 const DIP_PROCESSING_CHANGEOVER_MINUTES = 15;
+const MIXING_CHANGEOVER_MINUTES = 18;
+const MIXING_CHANGEOVER_TASK_IDS = new Set([
+  'task-cheese-mixing',
+  'task-dip-mixing',
+]);
 
 function createInitialRunSetups() {
   return Object.fromEntries(
@@ -41,12 +46,16 @@ function createInitialRunSetups() {
 }
 
 function createInitialProcessSetups() {
-  const processFolderRunIds = new Set(['run-veg-prep', 'run-packaging-prep', 'run-cheese-processing']);
+  const processFolderRunIds = new Set([
+    'run-veg-prep',
+    'run-packaging-prep',
+    'run-cheese-processing',
+  ]);
   const processFolderTasks = runTemplates
     .filter(runTemplate => processFolderRunIds.has(runTemplate.id))
     .flatMap(runTemplate => runTemplate.tasks);
   return Object.fromEntries(
-    processFolderTasks.map(taskId => [taskId, { amount: '1', employeeIds: [] }])
+    processFolderTasks.map(taskId => [taskId, { amount: '1', flavorCount: '1', employeeIds: [] }])
   );
 }
 
@@ -68,6 +77,14 @@ function getTaskDuration(template, amount, employeeIds = []) {
     duration += cycles * variableMinutes;
   }
   return Math.round(duration);
+}
+
+function getProcessTaskDuration(task, amount, employeeIds = [], flavorCount = 1) {
+  const baseDuration = getTaskDuration(task, amount, employeeIds);
+  if (MIXING_CHANGEOVER_TASK_IDS.has(task?.id)) {
+    return baseDuration + Math.max(0, Number(flavorCount) - 1) * MIXING_CHANGEOVER_MINUTES;
+  }
+  return baseDuration;
 }
 
 function getRunTaskIds(runTemplate) {
@@ -92,6 +109,9 @@ function getRunTaskDuration(runTemplate, taskId, amount, flavorCount = 1, employ
   const template = taskTemplates.find(t => t.id === taskId);
   if (!template) return 0;
   const taskAmount = getTaskAmountForRun(taskId, amount, flavorCount);
+  if (runTemplate?.id === 'run-dip-mixing') {
+    return getProcessTaskDuration(template, taskAmount, employeeIds, flavorCount);
+  }
   return getTaskDuration(template, taskAmount, employeeIds);
 }
 
@@ -176,23 +196,16 @@ function getDropTimeFromDrag(active, over) {
 }
 
 function getTaskAmountForRun(taskId, amount, flavorCount = 1) {
-  if (
-    taskId === 'task-flavor-changeover'
-    || taskId === 'task-cheese-changeover'
-  ) {
-    return Math.max(0, Number(flavorCount) - 1);
-  }
   return amount;
 }
 
 function hasFlavorCountField(runTemplateId) {
   return runTemplateId === 'run-dip-processing'
-    || runTemplateId === 'run-dip-mixing'
-    || runTemplateId === 'run-cheese-mixing';
+    || runTemplateId === 'run-dip-mixing';
 }
 
 function hasDefaultEmployeeField(runTemplateId) {
-  return runTemplateId === 'run-dip-mixing';
+  return false;
 }
 
 function getRunDisplayName(runTemplate, inputAmount, inputUnit, fallbackName = 'Production Run') {
@@ -443,20 +456,25 @@ function DraggableProcessTemplate({
   task,
   employees,
   amount,
+  flavorCount,
   employeeIds,
   onAmountChange,
+  onFlavorCountChange,
   onEmployeeToggle,
 }) {
   const parsedAmount = Math.max(1, Number(amount) || 1);
+  const parsedFlavorCount = Math.max(1, Number(flavorCount) || 1);
+  const changeovers = Math.max(0, parsedFlavorCount - 1);
   const selectedEmployeeIds = employeeIds || [];
   const maxSelections = task.maxPeopleAffectingDuration || 1;
-  const duration = getTaskDuration(task, parsedAmount, selectedEmployeeIds);
+  const duration = getProcessTaskDuration(task, parsedAmount, selectedEmployeeIds, parsedFlavorCount);
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `task-template-${task.id}`,
     data: {
       type: 'task-template',
       taskTemplate: task,
       inputAmount: parsedAmount,
+      flavorCount: parsedFlavorCount,
       employeeIds: selectedEmployeeIds,
     },
   });
@@ -491,6 +509,18 @@ function DraggableProcessTemplate({
             onChange={e => onAmountChange(e.target.value)}
           />
         </label>
+        {MIXING_CHANGEOVER_TASK_IDS.has(task.id) && (
+          <label className="compact-field process-amount-field">
+            <span>flavours</span>
+            <input
+              type="number"
+              min="1"
+              value={flavorCount}
+              onChange={e => onFlavorCountChange(e.target.value)}
+            />
+            <small>{formatAmountLabel(changeovers, 'changeovers')}</small>
+          </label>
+        )}
         {task.assignmentRoles ? (
           <div className="role-assignment-list">
             {task.assignmentRoles.map((role, roleIndex) => (
@@ -550,6 +580,7 @@ function ProcessFolder({
   isExpanded,
   onToggle,
   onAmountChange,
+  onFlavorCountChange,
   onEmployeeToggle,
 }) {
   return (
@@ -582,8 +613,10 @@ function ProcessFolder({
                 task={task}
                 employees={employees}
                 amount={setup.amount}
+                flavorCount={setup.flavorCount || '1'}
                 employeeIds={setup.employeeIds || []}
                 onAmountChange={amount => onAmountChange(taskId, amount)}
+                onFlavorCountChange={flavorCount => onFlavorCountChange(taskId, flavorCount)}
                 onEmployeeToggle={(employeeId, maxSelections) => onEmployeeToggle(taskId, employeeId, maxSelections)}
               />
             );
@@ -945,6 +978,16 @@ export default function App() {
     }));
   };
 
+  const handleProcessFlavorCountChange = (taskId, flavorCount) => {
+    setProcessSetups(prev => ({
+      ...prev,
+      [taskId]: {
+        ...(prev[taskId] || { employeeIds: [] }),
+        flavorCount,
+      },
+    }));
+  };
+
   const handleProcessEmployeeToggle = (taskId, employeeSelection, maxSelections = 1) => {
     setProcessSetups(prev => {
       const setup = prev[taskId] || { amount: '1', employeeIds: [] };
@@ -1067,9 +1110,10 @@ export default function App() {
         const template = active.data.current.taskTemplate;
         const runId = uuidv4();
         const inputAmount = Math.max(1, Number(active.data.current.inputAmount) || 1);
+        const flavorCount = Math.max(1, Number(active.data.current.flavorCount) || 1);
         const inputUnit = template.unitName;
         const employeeIds = active.data.current.employeeIds || [];
-        const duration = getTaskDuration(template, inputAmount, employeeIds);
+        const duration = getProcessTaskDuration(template, inputAmount, employeeIds, flavorCount);
 
         setScheduledTasks(prev => [...prev, {
           id: uuidv4(),
@@ -1083,6 +1127,7 @@ export default function App() {
           duration,
           employeeIds,
           inputAmount,
+          flavorCount,
           inputUnit,
           buckets: inputAmount,
         }]);
@@ -1090,6 +1135,7 @@ export default function App() {
           id: runId,
           templateId: null,
           inputAmount,
+          flavorCount,
           inputUnit,
           baseName: template.name,
           name: getRunDisplayName(null, inputAmount, inputUnit, template.name),
@@ -1140,14 +1186,18 @@ export default function App() {
 
       const firstTask = runTasks[0];
       const updates = new Map();
-      const flavorCount = activeRun?.flavorCount || 1;
+      const flavorCount = Math.max(1, Number(activeRun?.flavorCount || assigningTask.flavorCount) || 1);
       const layoutOffsets = runTemplate ? getRunLayout(runTemplate, inputAmount, flavorCount) : {};
 
       runTasks.forEach(t => {
         const template = taskTemplates.find(tt => tt.id === t.templateId);
         const taskAmount = getTaskAmountForRun(t.templateId, inputAmount, flavorCount);
         const employeeIds = t.id === assigningTask.id ? selectedEmployees : (t.employeeIds || []);
-        const duration = template ? getRunTaskDuration(runTemplate, t.templateId, inputAmount, flavorCount, employeeIds) : t.duration;
+        const duration = template
+          ? runTemplate
+            ? getRunTaskDuration(runTemplate, t.templateId, inputAmount, flavorCount, employeeIds)
+            : getProcessTaskDuration(template, inputAmount, employeeIds, flavorCount)
+          : t.duration;
         const taskStart = firstTask
           ? addMinutesToStart(firstTask.startHour, firstTask.startMinute || 0, layoutOffsets[t.templateId] || 0)
           : { startHour: t.startHour, startMinute: t.startMinute || 0 };
@@ -1160,6 +1210,7 @@ export default function App() {
           inputAmount: taskAmount,
           inputUnit: template?.unitName || inputUnit,
           buckets: taskAmount,
+          flavorCount,
           duration,
           employeeIds,
         });
@@ -1258,6 +1309,7 @@ export default function App() {
                         isExpanded={expandedRunId === runTemplate.id}
                         onToggle={() => setExpandedRunId(prev => prev === runTemplate.id ? null : runTemplate.id)}
                         onAmountChange={handleProcessAmountChange}
+                        onFlavorCountChange={handleProcessFlavorCountChange}
                         onEmployeeToggle={handleProcessEmployeeToggle}
                       />
                     );
