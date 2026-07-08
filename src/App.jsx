@@ -25,6 +25,7 @@ const DIP_PROCESSING_LINE_TASK_IDS = new Set([
   'task-dip-sleeves-boxes',
 ]);
 const DIP_PROCESSING_CHANGEOVER_MINUTES = 15;
+const DIP_PROCESSING_SETUP_CLEANUP_MINUTES = 60;
 const MIXING_CHANGEOVER_MINUTES = 18;
 const MIXING_CHANGEOVER_TASK_IDS = new Set([
   'task-cheese-mixing',
@@ -138,7 +139,7 @@ function getDipProcessingElapsedDuration(amount, flavorCount = 1) {
   });
   const productionMinutes = Math.max(...stationDurations);
   const changeoverMinutes = Math.max(0, Number(flavorCount) - 1) * DIP_PROCESSING_CHANGEOVER_MINUTES;
-  return Math.round(productionMinutes + changeoverMinutes);
+  return Math.round(DIP_PROCESSING_SETUP_CLEANUP_MINUTES + productionMinutes + changeoverMinutes);
 }
 
 function getRunTaskDuration(runTemplate, taskId, amount, flavorCount = 1, employeeIds = []) {
