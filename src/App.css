@@ -633,7 +633,7 @@
   font-weight: 500;
 }
 
-.form-group input, .form-group select {
+.form-group input, .form-group select, .form-group textarea {
   width: 100%;
   padding: 0.75rem;
   border: 1px solid var(--border-color);
@@ -641,10 +641,27 @@
   font-family: inherit;
 }
 
-.form-group input:focus, .form-group select:focus {
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus {
   outline: none;
   border-color: var(--primary);
   box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
+}
+
+.notes-field {
+  resize: vertical;
+  min-height: 88px;
+  line-height: 1.35;
+}
+
+.task-notes-preview {
+  gap: 0.25rem;
+  margin-top: 2px;
+}
+
+.task-notes-preview span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .checkbox-list {

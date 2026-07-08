@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { DndContext, useDraggable, useDroppable, pointerWithin, useSensors, useSensor, PointerSensor, DragOverlay } from '@dnd-kit/core';
 import { initialEmployees, taskTemplates, runTemplates, hoursOfDay } from './data';
-import { Clock, GripVertical, AlertCircle, Users, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Printer, Trash2 } from 'lucide-react';
+import { Clock, GripVertical, AlertCircle, Users, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Printer, Trash2, StickyNote } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { format, addWeeks, subWeeks, startOfWeek, addDays, getWeek } from 'date-fns';
 import TeamManagement from './TeamManagement';
@@ -796,6 +796,7 @@ function PrintWeekSchedule({
                       <th>Work Time</th>
                       <th>Employee</th>
                       <th>Run</th>
+                      <th>Notes</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -807,6 +808,7 @@ function PrintWeekSchedule({
                         <td>{formatDuration(task.duration)}</td>
                         <td>{getAssignedEmployeeNames(task)}</td>
                         <td>{getRunName(task)}</td>
+                        <td>{task.notes || '-'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -879,6 +881,12 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
           <AlertCircle size={12} style={{ flexShrink: 0 }} /> {widthPercent < 50 ? 'Un...' : 'Unassigned'}
         </div>
       )}
+      {scheduledTask.notes && height >= 58 && (
+        <div className="task-meta task-notes-preview">
+          <StickyNote size={12} />
+          <span>{scheduledTask.notes}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -912,6 +920,7 @@ export default function App() {
   const [assigningTask, setAssigningTask] = useState(null);
   const [selectedEmployees, setSelectedEmployees] = useState([]);
   const [selectedRunAmount, setSelectedRunAmount] = useState('1');
+  const [selectedNotes, setSelectedNotes] = useState('');
   const [runSetups, setRunSetups] = useState(() => createInitialRunSetups());
   const [processSetups, setProcessSetups] = useState(() => createInitialProcessSetups());
   const [expandedRunId, setExpandedRunId] = useState(null);
@@ -1090,6 +1099,7 @@ export default function App() {
             inputAmount: taskAmount,
             inputUnit: template.unitName,
             buckets: taskAmount,
+            notes: '',
           };
         }).filter(Boolean);
 
@@ -1131,6 +1141,7 @@ export default function App() {
           flavorCount,
           inputUnit,
           buckets: inputAmount,
+          notes: '',
         }]);
         setActiveRuns(prev => [...prev, {
           id: runId,
@@ -1214,6 +1225,7 @@ export default function App() {
           flavorCount,
           duration,
           employeeIds,
+          notes: t.id === assigningTask.id ? selectedNotes.trim() : (t.notes || ''),
         });
       });
 
@@ -1442,6 +1454,7 @@ export default function App() {
                           setAssigningTask(task);
                           setSelectedEmployees(task.employeeIds || (task.employeeId ? [task.employeeId] : []));
                           setSelectedRunAmount(String(task.inputAmount || task.buckets || activeRuns.find(run => run.id === task.runId)?.inputAmount || 1));
+                          setSelectedNotes(task.notes || '');
                           setIsAssignModalOpen(true);
                         }}
                       />
@@ -1519,6 +1532,16 @@ export default function App() {
                       );
                     })}
                   </div>
+                </div>
+                <div className="form-group">
+                  <label>Notes</label>
+                  <textarea
+                    className="notes-field"
+                    value={selectedNotes}
+                    onChange={e => setSelectedNotes(e.target.value)}
+                    placeholder="Flavours, SKU notes, special instructions..."
+                    rows={4}
+                  />
                 </div>
                 <div className="modal-actions" style={{ justifyContent: 'space-between' }}>
                   <button type="button" className="btn" style={{ backgroundColor: '#fee2e2', color: '#991b1b' }} onClick={handleDeleteTask}>Remove from Schedule</button>
