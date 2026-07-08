@@ -55,7 +55,10 @@ function getTaskDuration(template, amount, employeeIds = []) {
     const cycles = template.isBatchProcess
       ? Math.ceil(amount / template.unitsPerCycle)
       : amount / template.unitsPerCycle;
-    duration += (cycles * template.variableMinutesPerCycle) / getDurationWorkerCount(template, employeeIds);
+    const workerCount = getDurationWorkerCount(template, employeeIds);
+    const workerSpecificVariableMinutes = template.variableMinutesPerCycleByWorkerCount?.[workerCount];
+    const variableMinutes = workerSpecificVariableMinutes ?? (template.variableMinutesPerCycle / workerCount);
+    duration += cycles * variableMinutes;
   }
   return Math.round(duration);
 }

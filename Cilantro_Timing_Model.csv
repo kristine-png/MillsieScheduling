@@ -1,0 +1,11 @@
+Box count,Fixed setup/sink/portioning minutes,One-person labor minutes per 12 boxes,Two-person labor minutes per 12 boxes,People assigned,Total planned minutes,Total planned hours,Notes
+1,80,160,40,1,93,1.55,"Fixed time covers room setup, Viper sink setup, draining station, scale/bin setup, labeling, and storing."
+1,80,160,40,2,83,1.38,"Two people are the SOP-standard flow; the second person does not shorten sink/setup time."
+6,80,160,40,1,160,2.67,"One person has to unbunch, wash, drain, inspect, weigh, label, and store sequentially."
+6,80,160,40,2,100,1.67,"Close to the SOP expectation of 110 minutes with 2 people for 6 boxes."
+12,80,160,40,1,240,4.00,"One-person cilantro washing is treated as a slower exception, not the standard plan."
+12,80,160,40,2,120,2.00,"Matches the timing tracker: 12 boxes in about 2 hours with proper flow."
+18,80,160,40,1,320,5.33,"Refresh Viper solution after every 6 boxes or when cilantro is visibly dirty."
+18,80,160,40,2,140,2.33,"Two people keep washing, draining, inspection, and portioning moving together."
+24,80,160,40,1,400,6.67,"Large one-person runs should be avoided when possible."
+24,80,160,40,2,160,2.67,"Use this only if sink/drain/bin flow stays continuous."
