@@ -41,7 +41,7 @@ const DAILY_DUTY_BLOCKS = [
   {
     idPrefix: 'closing-duties',
     taskId: 'task-closing-duties',
-    startHour: 17,
+    startHour: 16,
     startMinute: 15,
     notes: 'Post-op cleaning plus garbage, recycling, cardboard, organics, and general waste.',
   },
@@ -1360,7 +1360,7 @@ export default function App() {
             <div className="sidebar-content" style={{ padding: '1rem' }}>
               <div>
                 <div className="section-title">Run Blocks</div>
-                {runTemplates.map(runTemplate => {
+                {runTemplates.filter(runTemplate => runTemplate.id !== 'run-sanitation-qa').map(runTemplate => {
                   const runSetup = runSetups[runTemplate.id] || { amount: '1', assignments: {} };
                   if (
                     runTemplate.id === 'run-dip-mixing'
