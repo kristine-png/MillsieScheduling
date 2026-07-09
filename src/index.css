@@ -43,6 +43,10 @@
   --sanitation-border: #94a3b8;
   --sanitation-text: #334155;
 
+  --misc-bg: #ede9fe;
+  --misc-border: #c4b5fd;
+  --misc-text: #5b21b6;
+
   /* Shadow & Radii */
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);

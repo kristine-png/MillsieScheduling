@@ -1,7 +1,11 @@
 export const initialEmployees = [
-  { id: 'emp-1', name: 'Alice', skills: { 'task-sanitation': 'expert', 'task-boiling': 'beginner', 'task-cleanup': 'expert', 'task-opening-duties': 'expert', 'task-closing-duties': 'expert' } },
-  { id: 'emp-2', name: 'Bob', skills: { 'task-sanitation': 'beginner', 'task-boiling': 'expert', 'task-cleanup': 'expert', 'task-opening-duties': 'beginner', 'task-closing-duties': 'expert' } },
-  { id: 'emp-3', name: 'Charlie', skills: { 'task-sanitation': 'untrained', 'task-boiling': 'untrained', 'task-cleanup': 'beginner', 'task-opening-duties': 'beginner', 'task-closing-duties': 'beginner' } },
+  { id: 'emp-1', name: 'Angelica', color: '#EB4213', skills: {} },
+  { id: 'emp-2', name: 'Tetiana', color: '#FF99DC', skills: {} },
+  { id: 'emp-3', name: 'An', color: '#826DEE', skills: {} },
+  { id: 'emp-4', name: 'Gaudiosa', color: '#D8F382', skills: {} },
+  { id: 'emp-5', name: 'Khemika', color: '#00C2A8', skills: {} },
+  { id: 'emp-6', name: 'Cecilia', color: '#FFB000', skills: {} },
+  { id: 'emp-7', name: 'Mellisa', color: '#3A86FF', skills: {} },
 ];
 
 export const taskTemplates = [
@@ -28,6 +32,17 @@ export const taskTemplates = [
     isBatchProcess: false,
   },
   {
+    id: 'task-misc-work',
+    groupId: 'misc-work',
+    name: 'Misc Work',
+    colorVar: '--misc',
+    baseMinutes: 30,
+    variableMinutesPerCycle: 0,
+    unitsPerCycle: 1,
+    unitName: 'blocks',
+    isBatchProcess: false,
+  },
+  {
     id: 'task-sanitation',
     groupId: 'ferment-prep',
     name: 'Bucket Sanitation',
@@ -41,9 +56,9 @@ export const taskTemplates = [
   {
     id: 'task-stickering',
     groupId: 'ferment-prep',
-    name: 'Stickering & Holdbac',
+    name: 'Bacteria & Bucket Labels',
     colorVar: '--ferment',
-    baseMinutes: 15,
+    baseMinutes: 30,
     variableMinutesPerCycle: 0,
     unitsPerCycle: 1,
     unitName: 'buckets',
@@ -52,13 +67,14 @@ export const taskTemplates = [
   {
     id: 'task-boiling',
     groupId: 'ferment-prep',
-    name: 'Fermentation Boiling',
+    name: 'Boiling & Mixing Flow',
     colorVar: '--ferment',
     baseMinutes: 0,
-    variableMinutesPerCycle: 8,
-    unitsPerCycle: 3,
+    variableMinutesPerCycle: 3.43,
+    unitsPerCycle: 1,
     unitName: 'buckets',
-    isBatchProcess: true, // Must run full cycles
+    isBatchProcess: false,
+    assignmentRoles: ['Boiling Lead', 'Boiling Support'],
   },
   {
     id: 'task-mixing',
@@ -76,11 +92,12 @@ export const taskTemplates = [
     groupId: 'ferment-prep',
     name: 'Fermentation Cleanup',
     colorVar: '--ferment',
-    baseMinutes: 120,
+    baseMinutes: 60,
     variableMinutesPerCycle: 0,
     unitsPerCycle: 1,
     unitName: 'buckets',
     isBatchProcess: false,
+    assignmentRoles: ['Cleanup 1', 'Cleanup 2'],
   },
   {
     id: 'task-dip-mixing',
@@ -200,13 +217,14 @@ export const taskTemplates = [
   {
     id: 'task-tape-boxes',
     groupId: 'packaging-prep',
-    name: 'Tape Dip/Cheese Boxes',
+    name: 'Tape Cases/Boxes',
     colorVar: '--packaging',
     baseMinutes: 0,
     variableMinutesPerCycle: 60,
     unitsPerCycle: 300,
-    unitName: 'boxes',
+    unitName: 'cases',
     isBatchProcess: true,
+    maxPeopleAffectingDuration: 2,
   },
   {
     id: 'task-dry-mix-prep-set',
@@ -269,10 +287,15 @@ export const taskTemplates = [
     name: 'Cheese Slicing',
     colorVar: '--cheese',
     baseMinutes: 0,
-    variableMinutesPerCycle: 10,
+    variableMinutesPerCycle: 30,
+    variableMinutesPerCycleByWorkerCount: {
+      2: 20,
+      3: 20,
+    },
     unitsPerCycle: 1,
-    unitName: 'pans',
+    unitName: 'batches',
     isBatchProcess: false,
+    maxPeopleAffectingDuration: 3,
   },
   {
     id: 'task-cheese-dipping',
@@ -284,6 +307,7 @@ export const taskTemplates = [
     unitsPerCycle: 1,
     unitName: 'racks',
     isBatchProcess: false,
+    maxPeopleAffectingDuration: 2,
   },
   {
     id: 'task-cheese-sealing',
@@ -291,9 +315,9 @@ export const taskTemplates = [
     name: 'Cheese Sealing',
     colorVar: '--cheese',
     baseMinutes: 0,
-    variableMinutesPerCycle: 36,
+    variableMinutesPerCycle: 40,
     variableMinutesPerCycleByWorkerCount: {
-      2: 18,
+      2: 20,
     },
     unitsPerCycle: 1,
     unitName: 'racks',
@@ -307,13 +331,13 @@ export const taskTemplates = [
     name: 'Cheese Packing',
     colorVar: '--cheese',
     baseMinutes: 0,
-    variableMinutesPerCycle: 19.5,
+    variableMinutesPerCycle: 55,
     variableMinutesPerCycleByWorkerCount: {
-      2: 9.75,
-      3: 6.5,
+      2: 27.5,
+      3: 18.33,
     },
     unitsPerCycle: 1,
-    unitName: 'bins',
+    unitName: 'batches',
     isBatchProcess: false,
     maxPeopleAffectingDuration: 3,
     assignmentRoles: ['Sealer 1', 'Sealer 2', 'Boxer'],
@@ -365,7 +389,6 @@ export const runTemplates = [
       'task-sanitation',
       'task-stickering',
       'task-boiling',
-      'task-mixing',
       'task-cleanup'
     ]
   },
@@ -429,7 +452,7 @@ export const runTemplates = [
     name: 'Cheese Processing Run',
     groupId: 'cheese-processing',
     inputType: 'single',
-    inputUnit: 'racks',
+    inputUnit: 'batches',
     bucketsPerInputUnit: 1,
     tasks: [
       'task-cheese-slicing',

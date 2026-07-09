@@ -10,13 +10,19 @@ import './App.css';
 const HOUR_ROW_HEIGHT = 80;
 const SCHEDULE_HOURS = 11;
 const SNAP_MINUTES = 5;
+const LUNCH_START_HOUR = 12;
+const LUNCH_START_MINUTE = 0;
+const LUNCH_DURATION_MINUTES = 30;
+const LUNCH_START_ABSOLUTE_MINUTES = (LUNCH_START_HOUR * 60) + LUNCH_START_MINUTE;
+const LUNCH_END_ABSOLUTE_MINUTES = LUNCH_START_ABSOLUTE_MINUTES + LUNCH_DURATION_MINUTES;
+const SCHEDULE_START_HOUR = 7;
+const FERMENTATION_BOILING_START_OFFSET_MINUTES = 15;
 
 const defaultFermentationAssignments = {
   'task-sanitation': ['emp-2'],
   'task-stickering': ['emp-2'],
-  'task-boiling': ['emp-2'],
-  'task-mixing': ['emp-1'],
-  'task-cleanup': ['emp-1'],
+  'task-boiling': ['emp-5', 'emp-6'],
+  'task-cleanup': ['emp-5', 'emp-6'],
 };
 
 const DIP_PROCESSING_LINE_TASK_IDS = new Set([
@@ -47,6 +53,61 @@ const DAILY_DUTY_BLOCKS = [
     notes: 'Post-op cleaning plus garbage, recycling, cardboard, organics, and general waste.',
   },
 ];
+const DEFAULT_AVAILABILITY = {
+  isWorking: true,
+  start: '07:00',
+  end: '17:00',
+  lunchMinutes: 30,
+};
+const EMPLOYEE_COLOR_FALLBACKS = ['#EB4213', '#FF99DC', '#826DEE', '#D8F382', '#00C2A8', '#FFB000', '#3A86FF', '#F97316'];
+const TASK_GROUP_LAYOUT_ORDER = [
+  'ferment-prep',
+  'cheese-processing',
+  'dip-processing',
+  'dip-mixing',
+  'veg-prep',
+  'packaging-prep',
+  'sanitation',
+  'misc-work',
+];
+const CHEESE_CASES_PER_BATCH_BY_FLAVOR = {
+  Smoke: 27.5,
+  Delight: 26.4,
+  Nigella: 27.1,
+  Meadow: 24.4,
+  Classic: 25.9,
+};
+const CHEESE_CASES_PER_RACK = 50;
+const CHEESE_BATCH_CONVERTIBLE_TASK_IDS = new Set([
+  'task-cheese-dipping',
+  'task-cheese-sealing',
+]);
+const CHEESE_BATCH_SHARED_TASK_IDS = new Set([
+  'task-cheese-slicing',
+  'task-cheese-dipping',
+  'task-cheese-sealing',
+  'task-cheese-packing',
+]);
+const TAPE_CASES_TASK_ID = 'task-tape-boxes';
+const CASES_PER_TAPE_BUNDLE = 25;
+const TAPE_CASES_PER_PALLET_BY_UNIT_MODE = {
+  cheesePallets: 84 * CASES_PER_TAPE_BUNDLE,
+  dipPallets: 56 * CASES_PER_TAPE_BUNDLE,
+};
+const DEFAULT_CHEESE_FLAVORS = [{ id: 'cheese-flavor-1', flavor: 'Smoke', batches: '1' }];
+const PREP_AHEAD_TASK_IDS = new Set([
+  'task-sanitation',
+  'task-stickering',
+  'task-date-containers',
+  'task-sticker-lids',
+  TAPE_CASES_TASK_ID,
+]);
+const ASSUMPTION_FLAG_TASK_IDS = new Set([
+  TAPE_CASES_TASK_ID,
+  'task-cheese-dipping',
+  'task-cheese-sealing',
+  'task-cheese-packing',
+]);
 
 function createInitialRunSetups() {
   return Object.fromEntries(
@@ -55,8 +116,11 @@ function createInitialRunSetups() {
       {
         amount: '1',
         flavorCount: '1',
+        cheeseFlavor: 'Smoke',
+        cheeseFlavors: runTemplate.id === 'run-cheese-processing' ? DEFAULT_CHEESE_FLAVORS : undefined,
         defaultEmployeeId: '',
         assignments: runTemplate.id === 'run-fermentation' ? defaultFermentationAssignments : {},
+        prepAheadTaskIds: [],
       },
     ])
   );
@@ -67,13 +131,19 @@ function createInitialProcessSetups() {
     'run-dip-mixing',
     'run-veg-prep',
     'run-packaging-prep',
-    'run-cheese-processing',
   ]);
   const processFolderTasks = runTemplates
     .filter(runTemplate => processFolderRunIds.has(runTemplate.id))
     .flatMap(runTemplate => runTemplate.tasks);
   return Object.fromEntries(
-    processFolderTasks.map(taskId => [taskId, { amount: '1', flavorCount: '1', employeeIds: [] }])
+    processFolderTasks.map(taskId => [taskId, {
+      amount: '1',
+      flavorCount: '1',
+      unitMode: taskId === TAPE_CASES_TASK_ID ? 'cases' : 'racks',
+      cheeseFlavor: 'Smoke',
+      employeeIds: [],
+      prepAhead: false,
+    }])
   );
 }
 
@@ -120,16 +190,69 @@ function getTaskDuration(template, amount, employeeIds = []) {
   return Math.round(duration);
 }
 
-function getProcessTaskDuration(task, amount, employeeIds = [], flavorCount = 1) {
+function getCheeseRackEstimate(batchCount, flavor) {
+  const casesPerBatch = CHEESE_CASES_PER_BATCH_BY_FLAVOR[flavor] || 26;
+  const expectedCases = Math.max(1, Number(batchCount) || 1) * casesPerBatch;
+  return Math.max(1, Math.ceil(expectedCases / CHEESE_CASES_PER_RACK));
+}
+
+function normalizeCheeseFlavors(cheeseFlavors, fallbackAmount = 1, fallbackFlavor = 'Smoke') {
+  const rows = Array.isArray(cheeseFlavors) && cheeseFlavors.length > 0
+    ? cheeseFlavors
+    : [{ id: 'cheese-flavor-1', flavor: fallbackFlavor || 'Smoke', batches: String(fallbackAmount || 1) }];
+
+  return rows.map((row, index) => ({
+    id: row.id || `cheese-flavor-${index + 1}`,
+    flavor: row.flavor || 'Smoke',
+    batches: Math.max(1, Number(row.batches) || 1),
+  }));
+}
+
+function getCheesePlan(cheeseFlavors, fallbackAmount = 1, fallbackFlavor = 'Smoke') {
+  const rows = normalizeCheeseFlavors(cheeseFlavors, fallbackAmount, fallbackFlavor);
+  const totalBatches = rows.reduce((sum, row) => sum + row.batches, 0);
+  const totalRacks = rows.reduce((sum, row) => sum + getCheeseRackEstimate(row.batches, row.flavor), 0);
+  const summary = rows.map(row => `${formatAmountLabel(row.batches, 'batches')} ${row.flavor}`).join(', ');
+
+  return { rows, totalBatches, totalRacks, summary };
+}
+
+function getCheeseProcessAmount(task, amount, unitMode = 'racks', flavor = 'Smoke') {
+  if (CHEESE_BATCH_CONVERTIBLE_TASK_IDS.has(task?.id) && unitMode === 'batches') {
+    return getCheeseRackEstimate(amount, flavor);
+  }
+  return Math.max(1, Number(amount) || 1);
+}
+
+function getTapeCasesAmount(amount, unitMode = 'cases') {
+  const parsedAmount = Math.max(1, Number(amount) || 1);
+  const casesPerPallet = TAPE_CASES_PER_PALLET_BY_UNIT_MODE[unitMode];
+  return casesPerPallet ? parsedAmount * casesPerPallet : parsedAmount;
+}
+
+function getProcessTaskDuration(task, amount, employeeIds = [], flavorCount = 1, unitMode = 'racks', flavor = 'Smoke') {
+  if (task?.id === TAPE_CASES_TASK_ID) {
+    return getTaskDuration(task, getTapeCasesAmount(amount, unitMode), employeeIds);
+  }
+
+  const effectiveAmount = getCheeseProcessAmount(task, amount, unitMode, flavor);
   const baseDuration = getTaskDuration(task, amount, employeeIds);
   if (MIXING_CHANGEOVER_TASK_IDS.has(task?.id)) {
     return baseDuration + Math.max(0, Number(flavorCount) - 1) * MIXING_CHANGEOVER_MINUTES;
+  }
+  if (effectiveAmount !== amount) {
+    return getTaskDuration(task, effectiveAmount, employeeIds);
   }
   return baseDuration;
 }
 
 function getRunTaskIds(runTemplate) {
   return runTemplate.tasks;
+}
+
+function getActiveRunTaskIds(runTemplate, prepAheadTaskIds = []) {
+  const skipped = new Set(prepAheadTaskIds || []);
+  return getRunTaskIds(runTemplate).filter(taskId => !skipped.has(taskId));
 }
 
 function getDipProcessingElapsedDuration(amount, flavorCount = 1) {
@@ -142,28 +265,36 @@ function getDipProcessingElapsedDuration(amount, flavorCount = 1) {
   return Math.round(DIP_PROCESSING_SETUP_CLEANUP_MINUTES + productionMinutes + changeoverMinutes);
 }
 
-function getRunTaskDuration(runTemplate, taskId, amount, flavorCount = 1, employeeIds = []) {
+function getRunTaskDuration(runTemplate, taskId, amount, flavorCount = 1, employeeIds = [], cheeseFlavor = 'Smoke', cheeseFlavors = null) {
   if (runTemplate?.id === 'run-dip-processing' && DIP_PROCESSING_LINE_TASK_IDS.has(taskId)) {
     return getDipProcessingElapsedDuration(amount, flavorCount);
   }
 
   const template = taskTemplates.find(t => t.id === taskId);
   if (!template) return 0;
-  const taskAmount = getTaskAmountForRun(taskId, amount, flavorCount);
+  const taskAmount = getTaskAmountForRun(taskId, amount, flavorCount, cheeseFlavor, cheeseFlavors);
   if (runTemplate?.id === 'run-dip-mixing') {
     return getProcessTaskDuration(template, taskAmount, employeeIds, flavorCount);
   }
   return getTaskDuration(template, taskAmount, employeeIds);
 }
 
-function getRunConfiguredDuration(runTemplate, amount, flavorCount = 1, assignments = {}) {
+function getRunConfiguredDuration(runTemplate, amount, flavorCount = 1, assignments = {}, cheeseFlavor = 'Smoke', cheeseFlavors = null, prepAheadTaskIds = []) {
   if (runTemplate.id === 'run-dip-processing') {
     return getDipProcessingElapsedDuration(amount, flavorCount);
   }
 
-  return getRunTaskIds(runTemplate).reduce((sum, taskId) => {
-    const taskAmount = getTaskAmountForRun(taskId, amount, flavorCount);
-    return sum + getRunTaskDuration(runTemplate, taskId, taskAmount, flavorCount, assignments[taskId] || []);
+  if (runTemplate.id === 'run-fermentation') {
+    const layoutOffsets = getRunLayout(runTemplate, amount, flavorCount, cheeseFlavor, assignments, cheeseFlavors);
+    const activeTaskIds = getActiveRunTaskIds(runTemplate, prepAheadTaskIds);
+    if (activeTaskIds.length === 0) return 0;
+    return Math.max(...activeTaskIds.map(taskId => {
+      return (layoutOffsets[taskId] || 0) + getRunTaskDuration(runTemplate, taskId, amount, flavorCount, assignments[taskId] || [], cheeseFlavor, cheeseFlavors);
+    }));
+  }
+
+  return getActiveRunTaskIds(runTemplate, prepAheadTaskIds).reduce((sum, taskId) => {
+    return sum + getRunTaskDuration(runTemplate, taskId, amount, flavorCount, assignments[taskId] || [], cheeseFlavor, cheeseFlavors);
   }, 0);
 }
 
@@ -191,6 +322,7 @@ const singularUnits = {
   inspections: 'inspection',
   lids: 'lid',
   pans: 'pan',
+  pallets: 'pallet',
   'prep sets': 'prep set',
   racks: 'rack',
   runs: 'run',
@@ -212,11 +344,136 @@ function formatTime(hour, min = 0) {
   return `${h}:${m} ${ampm}`;
 }
 
+function timeInputToMinutes(value) {
+  const [hours, minutes] = String(value || '00:00').split(':').map(Number);
+  return (hours * 60) + (minutes || 0);
+}
+
+function formatHours(minutes) {
+  const rounded = Math.round(minutes);
+  const hours = Math.floor(rounded / 60);
+  const remainingMinutes = rounded % 60;
+  if (hours === 0) return `${remainingMinutes}m`;
+  if (remainingMinutes === 0) return `${hours}h`;
+  return `${hours}h ${remainingMinutes}m`;
+}
+
+function getAvailabilityKey(dayId, employeeId) {
+  return `${dayId}-${employeeId}`;
+}
+
+function getTaskEmployeeIds(task) {
+  return task.employeeIds || (task.employeeId ? [task.employeeId] : []);
+}
+
+function getTaskDefaultNote(task, sourceAmountLabel = '') {
+  if (!task) return '';
+  if (task.id === TAPE_CASES_TASK_ID) {
+    return sourceAmountLabel
+      ? `Estimated from ${sourceAmountLabel}; timing uses 300 cases per hour.`
+      : 'Timing uses 300 cases per hour.';
+  }
+  if (CHEESE_BATCH_CONVERTIBLE_TASK_IDS.has(task.id) && sourceAmountLabel) {
+    return `Estimated from ${sourceAmountLabel}.`;
+  }
+  if (task.id === 'task-boiling') {
+    return 'Full boiling and mixing flow; bucket washing can overlap after first 15 minutes.';
+  }
+  return '';
+}
+
+function mergeNotes(defaultNote, customNote = '') {
+  return [defaultNote, customNote].filter(Boolean).join('\n');
+}
+
+function getTaskGroupLayoutRank(groupId) {
+  const index = TASK_GROUP_LAYOUT_ORDER.indexOf(groupId);
+  return index === -1 ? TASK_GROUP_LAYOUT_ORDER.length : index;
+}
+
+function getEmployeeColor(employee, index = 0) {
+  return employee?.color || EMPLOYEE_COLOR_FALLBACKS[index % EMPLOYEE_COLOR_FALLBACKS.length];
+}
+
+function getAvailableMinutes(availability = DEFAULT_AVAILABILITY) {
+  if (!availability.isWorking) return 0;
+
+  const shiftMinutes = Math.max(0, timeInputToMinutes(availability.end) - timeInputToMinutes(availability.start));
+  const lunchMinutes = Math.max(0, Number(availability.lunchMinutes ?? DEFAULT_AVAILABILITY.lunchMinutes) || 0);
+  return Math.max(0, shiftMinutes - lunchMinutes);
+}
+
+function getAbsoluteMinutes(hour, minute = 0) {
+  return (hour * 60) + (minute || 0);
+}
+
+function getTimeFromAbsoluteMinutes(totalMinutes) {
+  return {
+    startHour: Math.floor(totalMinutes / 60),
+    startMinute: totalMinutes % 60,
+  };
+}
+
+function moveStartOutOfLunch(totalMinutes) {
+  if (totalMinutes >= LUNCH_START_ABSOLUTE_MINUTES && totalMinutes < LUNCH_END_ABSOLUTE_MINUTES) {
+    return LUNCH_END_ABSOLUTE_MINUTES;
+  }
+  return totalMinutes;
+}
+
+function addWorkMinutesToAbsoluteStart(startTotalMinutes, workMinutes) {
+  const normalizedStart = moveStartOutOfLunch(startTotalMinutes);
+  const rawEnd = normalizedStart + workMinutes;
+
+  if (normalizedStart < LUNCH_START_ABSOLUTE_MINUTES && rawEnd > LUNCH_START_ABSOLUTE_MINUTES) {
+    return rawEnd + LUNCH_DURATION_MINUTES;
+  }
+
+  return rawEnd;
+}
+
+function addWorkMinutesToStart(startHour, startMinute, minutesToAdd) {
+  return getTimeFromAbsoluteMinutes(addWorkMinutesToAbsoluteStart(getAbsoluteMinutes(startHour, startMinute), minutesToAdd));
+}
+
+function getTaskElapsedMinutes(task) {
+  const start = getAbsoluteMinutes(task.startHour, task.startMinute || 0);
+  return addWorkMinutesToAbsoluteStart(start, task.duration) - moveStartOutOfLunch(start);
+}
+
+function getTaskWorkSegments(task) {
+  const rawStart = getAbsoluteMinutes(task.startHour, task.startMinute || 0);
+  const start = moveStartOutOfLunch(rawStart);
+  const duration = Math.max(0, task.duration || 0);
+
+  if (duration <= 0) return [];
+
+  const endWithoutLunch = start + duration;
+  if (start >= LUNCH_END_ABSOLUTE_MINUTES || endWithoutLunch <= LUNCH_START_ABSOLUTE_MINUTES) {
+    return [{ start, duration }];
+  }
+
+  const beforeLunchDuration = Math.max(0, LUNCH_START_ABSOLUTE_MINUTES - start);
+  const afterLunchDuration = duration - beforeLunchDuration;
+  const segments = [];
+
+  if (beforeLunchDuration > 0) {
+    segments.push({ start, duration: beforeLunchDuration });
+  }
+  if (afterLunchDuration > 0) {
+    segments.push({ start: LUNCH_END_ABSOLUTE_MINUTES, duration: afterLunchDuration });
+  }
+
+  return segments;
+}
+
 function getTaskTimeRange(task) {
-  const endTotalMins = (task.startHour * 60) + (task.startMinute || 0) + task.duration;
-  const endHour = Math.floor(endTotalMins / 60);
-  const endMin = endTotalMins % 60;
-  return `${formatTime(task.startHour, task.startMinute || 0)} - ${formatTime(endHour, endMin)}`;
+  const rawStart = getAbsoluteMinutes(task.startHour, task.startMinute || 0);
+  const startTotalMins = moveStartOutOfLunch(rawStart);
+  const endTotalMins = addWorkMinutesToAbsoluteStart(rawStart, task.duration);
+  const startTime = getTimeFromAbsoluteMinutes(startTotalMins);
+  const endTime = getTimeFromAbsoluteMinutes(endTotalMins);
+  return `${formatTime(startTime.startHour, startTime.startMinute)} - ${formatTime(endTime.startHour, endTime.startMinute)}`;
 }
 
 function getDropTimeFromDrag(active, over) {
@@ -227,17 +484,30 @@ function getDropTimeFromDrag(active, over) {
   const clampedY = Math.max(0, Math.min(dropY, maxY));
   const totalMinutes = (clampedY / HOUR_ROW_HEIGHT) * 60;
   const snappedTotalMinutes = Math.round(totalMinutes / SNAP_MINUTES) * SNAP_MINUTES;
-  const startHour = 7 + Math.floor(snappedTotalMinutes / 60);
-  const startMinute = snappedTotalMinutes % 60;
+  const rawStartTotalMinutes = (SCHEDULE_START_HOUR * 60) + snappedTotalMinutes;
+  const adjustedStartTotalMinutes = moveStartOutOfLunch(rawStartTotalMinutes);
+  const adjustedScheduleMinutes = adjustedStartTotalMinutes - (SCHEDULE_START_HOUR * 60);
+  const startHour = Math.floor(adjustedStartTotalMinutes / 60);
+  const startMinute = adjustedStartTotalMinutes % 60;
 
   return {
     startHour,
     startMinute,
-    top: (snappedTotalMinutes / 60) * HOUR_ROW_HEIGHT,
+    top: (adjustedScheduleMinutes / 60) * HOUR_ROW_HEIGHT,
   };
 }
 
-function getTaskAmountForRun(taskId, amount, flavorCount = 1) {
+function getTaskAmountForRun(taskId, amount, flavorCount = 1, cheeseFlavor = 'Smoke', cheeseFlavors = null) {
+  if (CHEESE_BATCH_SHARED_TASK_IDS.has(taskId) && cheeseFlavors) {
+    const cheesePlan = getCheesePlan(cheeseFlavors, amount, cheeseFlavor);
+    return CHEESE_BATCH_CONVERTIBLE_TASK_IDS.has(taskId)
+      ? cheesePlan.totalRacks
+      : cheesePlan.totalBatches;
+  }
+  if (CHEESE_BATCH_CONVERTIBLE_TASK_IDS.has(taskId)) {
+    const task = taskTemplates.find(t => t.id === taskId);
+    return getCheeseProcessAmount(task, amount, 'batches', cheeseFlavor);
+  }
   return amount;
 }
 
@@ -255,30 +525,25 @@ function getRunDisplayName(runTemplate, inputAmount, inputUnit, fallbackName = '
 }
 
 function addMinutesToStart(startHour, startMinute, minutesToAdd) {
-  const totalMinutes = startHour * 60 + startMinute + minutesToAdd;
-  return {
-    startHour: Math.floor(totalMinutes / 60),
-    startMinute: totalMinutes % 60,
-  };
+  return addWorkMinutesToStart(startHour, startMinute, minutesToAdd);
 }
 
-function getSequentialLayout(runTemplate, amount, flavorCount = 1) {
+function getSequentialLayout(runTemplate, amount, flavorCount = 1, cheeseFlavor = 'Smoke', assignments = {}, cheeseFlavors = null) {
   let offset = 0;
   return Object.fromEntries(getRunTaskIds(runTemplate).map(taskId => {
-    const taskAmount = getTaskAmountForRun(taskId, amount, flavorCount);
     const currentOffset = offset;
-    offset += getRunTaskDuration(runTemplate, taskId, taskAmount, flavorCount);
+    offset += getRunTaskDuration(runTemplate, taskId, amount, flavorCount, assignments[taskId] || [], cheeseFlavor, cheeseFlavors);
     return [taskId, currentOffset];
   }));
 }
 
-function getRunLayout(runTemplate, amount, flavorCount = 1) {
+function getRunLayout(runTemplate, amount, flavorCount = 1, cheeseFlavor = 'Smoke', assignments = {}, cheeseFlavors = null) {
   if (runTemplate.id === 'run-dip-processing') {
     return Object.fromEntries(runTemplate.tasks.map(taskId => [taskId, 0]));
   }
 
   if (runTemplate.id !== 'run-fermentation') {
-    return getSequentialLayout(runTemplate, amount, flavorCount);
+    return getSequentialLayout(runTemplate, amount, flavorCount, cheeseFlavor, assignments, cheeseFlavors);
   }
 
   const durationByTaskId = Object.fromEntries(
@@ -288,22 +553,13 @@ function getRunLayout(runTemplate, amount, flavorCount = 1) {
     })
   );
 
-  const sanitationDuration = durationByTaskId['task-sanitation'] || 0;
-  const stickeringDuration = durationByTaskId['task-stickering'] || 0;
   const boilingDuration = durationByTaskId['task-boiling'] || 0;
-  const mixingDuration = durationByTaskId['task-mixing'] || 0;
-  const boilStartOffset = sanitationDuration + stickeringDuration;
-  const mixingStartOffset = boilStartOffset + 4;
-  const cleanupStartOffset = Math.max(
-    boilStartOffset + boilingDuration,
-    mixingStartOffset + Math.max(0, mixingDuration - 91)
-  );
+  const cleanupStartOffset = FERMENTATION_BOILING_START_OFFSET_MINUTES + boilingDuration;
 
   return {
     'task-sanitation': 0,
-    'task-stickering': sanitationDuration,
-    'task-boiling': boilStartOffset,
-    'task-mixing': mixingStartOffset,
+    'task-stickering': 0,
+    'task-boiling': FERMENTATION_BOILING_START_OFFSET_MINUTES,
     'task-cleanup': cleanupStartOffset,
   };
 }
@@ -323,37 +579,51 @@ function DraggableRunTemplate({
   employees,
   amount,
   flavorCount,
+  cheeseFlavor,
+  cheeseFlavors,
   defaultEmployeeId,
-  assignments,
+  assignments = {},
+  prepAheadTaskIds = [],
   isExpanded,
   onToggle,
   onAmountChange,
   onFlavorCountChange,
+  onCheeseFlavorChange,
+  onCheeseFlavorsChange,
   onDefaultEmployeeChange,
   onAssignmentChange,
+  onPrepAheadToggle,
 }) {
   const parsedAmount = Math.max(1, Number(amount) || 1);
   const parsedFlavorCount = Math.max(1, Number(flavorCount) || 1);
   const changeovers = Math.max(0, parsedFlavorCount - 1);
+  const cheesePlan = getCheesePlan(cheeseFlavors, parsedAmount, cheeseFlavor);
+  const runAmount = runTemplate.id === 'run-cheese-processing' ? cheesePlan.totalBatches : parsedAmount;
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `run-template-${runTemplate.id}`,
     data: {
       type: 'run-template',
       runTemplate,
-      inputAmount: parsedAmount,
+      inputAmount: runAmount,
       flavorCount: parsedFlavorCount,
+      cheeseFlavor,
+      cheeseFlavors: runTemplate.id === 'run-cheese-processing' ? cheesePlan.rows : undefined,
       defaultEmployeeId,
       assignments,
+      prepAheadTaskIds,
     },
   });
 
   const totalConfiguredMinutes = getRunConfiguredDuration(
     runTemplate,
-    parsedAmount,
+    runAmount,
     parsedFlavorCount,
-    assignments
+    assignments,
+    cheeseFlavor,
+    runTemplate.id === 'run-cheese-processing' ? cheesePlan.rows : null,
+    prepAheadTaskIds
   );
-  const durationLabel = runTemplate.id === 'run-dip-processing' ? 'line time' : 'total work';
+  const durationLabel = ['run-dip-processing', 'run-fermentation'].includes(runTemplate.id) ? 'timeline time' : 'total work';
 
   return (
     <div className="run-setup-card">
@@ -372,7 +642,7 @@ function DraggableRunTemplate({
           <div className="task-title" style={{ fontSize: '0.875rem' }}>{runTemplate.name}</div>
           <div className="task-meta">
             <Clock size={12} />
-            {formatAmountLabel(parsedAmount, runTemplate.inputUnit)}, {formatDuration(totalConfiguredMinutes)} {durationLabel}
+            {formatAmountLabel(runAmount, runTemplate.inputUnit)}, {formatDuration(totalConfiguredMinutes)} {durationLabel}
           </div>
         </div>
         <ChevronDown size={16} className={`run-expand-icon ${isExpanded ? 'is-expanded' : ''}`} />
@@ -380,15 +650,17 @@ function DraggableRunTemplate({
 
       {isExpanded && (
       <div className="run-setup-controls">
-        <label className="compact-field">
-          <span>{getDisplayUnit(parsedAmount, runTemplate.inputUnit)}</span>
-          <input
-            type="number"
-            min="1"
-            value={amount}
-            onChange={e => onAmountChange(e.target.value)}
-          />
-        </label>
+        {runTemplate.id !== 'run-cheese-processing' && (
+          <label className="compact-field">
+            <span>{getDisplayUnit(parsedAmount, runTemplate.inputUnit)}</span>
+            <input
+              type="number"
+              min="1"
+              value={amount}
+              onChange={e => onAmountChange(e.target.value)}
+            />
+          </label>
+        )}
 
         {hasFlavorCountField(runTemplate.id) && (
           <label className="compact-field">
@@ -401,6 +673,72 @@ function DraggableRunTemplate({
             />
             <small>{formatAmountLabel(changeovers, 'changeovers')}</small>
           </label>
+        )}
+
+        {runTemplate.id === 'run-cheese-processing' && (
+          <div className="cheese-flavour-list">
+            <div className="cheese-flavour-summary">
+              <span>{formatAmountLabel(cheesePlan.totalBatches, 'batches')}</span>
+              <small>{formatAmountLabel(cheesePlan.totalRacks, 'racks')} est.</small>
+            </div>
+            {cheesePlan.rows.map((row, index) => (
+              <div key={row.id} className="cheese-flavour-row">
+                <select
+                  value={row.flavor}
+                  onChange={e => {
+                    const nextRows = cheesePlan.rows.map(item => (
+                      item.id === row.id ? { ...item, flavor: e.target.value } : item
+                    ));
+                    onCheeseFlavorsChange(nextRows);
+                    if (index === 0) onCheeseFlavorChange(e.target.value);
+                  }}
+                >
+                  {Object.keys(CHEESE_CASES_PER_BATCH_BY_FLAVOR).map(flavor => (
+                    <option key={flavor} value={flavor}>{flavor}</option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  min="1"
+                  value={row.batches}
+                  onChange={e => {
+                    const nextRows = cheesePlan.rows.map(item => (
+                      item.id === row.id ? { ...item, batches: e.target.value } : item
+                    ));
+                    onCheeseFlavorsChange(nextRows);
+                    onAmountChange(String(getCheesePlan(nextRows).totalBatches));
+                  }}
+                />
+                <span>{formatAmountLabel(getCheeseRackEstimate(row.batches, row.flavor), 'racks')}</span>
+                <button
+                  type="button"
+                  className="mini-remove-button"
+                  disabled={cheesePlan.rows.length === 1}
+                  onClick={() => {
+                    const nextRows = cheesePlan.rows.filter(item => item.id !== row.id);
+                    onCheeseFlavorsChange(nextRows);
+                    onAmountChange(String(getCheesePlan(nextRows).totalBatches));
+                  }}
+                >
+                  x
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              className="btn btn-secondary add-flavour-button"
+              onClick={() => {
+                const nextRows = [
+                  ...cheesePlan.rows,
+                  { id: `cheese-flavor-${Date.now()}`, flavor: 'Smoke', batches: 1 },
+                ];
+                onCheeseFlavorsChange(nextRows);
+                onAmountChange(String(getCheesePlan(nextRows).totalBatches));
+              }}
+            >
+              Add flavour
+            </button>
+          </div>
         )}
 
         {hasDefaultEmployeeField(runTemplate.id) && (
@@ -424,6 +762,7 @@ function DraggableRunTemplate({
             const task = taskTemplates.find(t => t.id === taskId);
             if (!task) return null;
             const selectedEmployeeIds = assignments[taskId] || [];
+            const isPrepAhead = (prepAheadTaskIds || []).includes(taskId);
             const overrideEmployeeId = selectedEmployeeIds[0] || '';
             const defaultEmployee = employees.find(emp => emp.id === defaultEmployeeId);
             const defaultOptionLabel = defaultEmployee
@@ -433,7 +772,19 @@ function DraggableRunTemplate({
 
             return (
               <div key={taskId} className="run-assignment-row">
-                <label className="run-assignment-name" htmlFor={`${runTemplate.id}-${taskId}-employee`}>{task.name}</label>
+                <div className="run-assignment-heading">
+                  <label className="run-assignment-name" htmlFor={`${runTemplate.id}-${taskId}-employee`}>{task.name}</label>
+                  {PREP_AHEAD_TASK_IDS.has(taskId) && (
+                    <label className="prep-ahead-toggle">
+                      <input
+                        type="checkbox"
+                        checked={isPrepAhead}
+                        onChange={() => onPrepAheadToggle(taskId)}
+                      />
+                      <span>Done day before</span>
+                    </label>
+                  )}
+                </div>
                 {task.assignmentRoles ? (
                   <div className="role-assignment-list">
                     {task.assignmentRoles.map((role, roleIndex) => (
@@ -499,25 +850,46 @@ function DraggableProcessTemplate({
   employees,
   amount,
   flavorCount,
+  unitMode,
+  cheeseFlavor,
   employeeIds,
+  prepAhead,
   onAmountChange,
   onFlavorCountChange,
+  onUnitModeChange,
+  onCheeseFlavorChange,
   onEmployeeToggle,
+  onPrepAheadToggle,
 }) {
   const parsedAmount = Math.max(1, Number(amount) || 1);
   const parsedFlavorCount = Math.max(1, Number(flavorCount) || 1);
   const changeovers = Math.max(0, parsedFlavorCount - 1);
+  const isTapeCasesTask = task.id === TAPE_CASES_TASK_ID;
+  const selectedUnitMode = unitMode || (isTapeCasesTask ? 'cases' : 'racks');
+  const selectedCheeseFlavor = cheeseFlavor || 'Smoke';
+  const isCheeseConvertible = CHEESE_BATCH_CONVERTIBLE_TASK_IDS.has(task.id);
+  const effectiveAmount = isTapeCasesTask
+    ? getTapeCasesAmount(parsedAmount, selectedUnitMode)
+    : getCheeseProcessAmount(task, parsedAmount, selectedUnitMode, selectedCheeseFlavor);
+  const displayUnitName = isTapeCasesTask
+    ? (selectedUnitMode === 'cases' ? 'cases' : 'pallets')
+    : (isCheeseConvertible && selectedUnitMode === 'batches' ? 'batches' : task.unitName);
   const selectedEmployeeIds = employeeIds || [];
   const maxSelections = task.maxPeopleAffectingDuration || 1;
-  const duration = getProcessTaskDuration(task, parsedAmount, selectedEmployeeIds, parsedFlavorCount);
+  const duration = getProcessTaskDuration(task, parsedAmount, selectedEmployeeIds, parsedFlavorCount, selectedUnitMode, selectedCheeseFlavor);
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `task-template-${task.id}`,
+    disabled: prepAhead,
     data: {
       type: 'task-template',
       taskTemplate: task,
       inputAmount: parsedAmount,
       flavorCount: parsedFlavorCount,
+      unitMode: selectedUnitMode,
+      cheeseFlavor: selectedCheeseFlavor,
+      effectiveAmount,
       employeeIds: selectedEmployeeIds,
+      prepAhead,
     },
   });
 
@@ -528,7 +900,7 @@ function DraggableProcessTemplate({
         {...listeners}
         {...attributes}
         className={`task-template task-${task.groupId} process-task-card`}
-        style={{ opacity: isDragging ? 0.5 : 1, marginBottom: 0, touchAction: 'none' }}
+        style={{ opacity: prepAhead ? 0.55 : (isDragging ? 0.5 : 1), marginBottom: 0, touchAction: 'none' }}
       >
         <div className="run-drag-handle" aria-hidden="true">
           <GripVertical size={16} className="drag-handle-icon" />
@@ -537,13 +909,25 @@ function DraggableProcessTemplate({
           <div className="task-title" style={{ fontSize: '0.825rem' }}>{task.name}</div>
           <div className="task-meta">
             <Clock size={12} />
-            {formatAmountLabel(parsedAmount, task.unitName)}, {formatDuration(duration)}
+            {formatAmountLabel(parsedAmount, displayUnitName)}
+            {isTapeCasesTask && selectedUnitMode !== 'cases' ? ` -> ${formatAmountLabel(effectiveAmount, 'cases')}` : ''}
+            {isCheeseConvertible && selectedUnitMode === 'batches' ? ` -> ${formatAmountLabel(effectiveAmount, task.unitName)}` : ''}, {prepAhead ? 'done day before' : formatDuration(duration)}
           </div>
         </div>
       </div>
       <div className="process-setup-controls">
+        {PREP_AHEAD_TASK_IDS.has(task.id) && (
+          <label className="prep-ahead-toggle prep-ahead-toggle-inline">
+            <input
+              type="checkbox"
+              checked={Boolean(prepAhead)}
+              onChange={onPrepAheadToggle}
+            />
+            <span>Done day before</span>
+          </label>
+        )}
         <label className="compact-field process-amount-field">
-          <span>{getDisplayUnit(parsedAmount, task.unitName)}</span>
+          <span>{getDisplayUnit(parsedAmount, displayUnitName)}</span>
           <input
             type="number"
             min="1"
@@ -551,6 +935,52 @@ function DraggableProcessTemplate({
             onChange={e => onAmountChange(e.target.value)}
           />
         </label>
+        {isCheeseConvertible && (
+          <div className="cheese-conversion-controls">
+            <label className="compact-field">
+              <span>Unit</span>
+              <select
+                value={selectedUnitMode}
+                onChange={e => onUnitModeChange(e.target.value)}
+              >
+                <option value="racks">Racks</option>
+                <option value="batches">Batches</option>
+              </select>
+            </label>
+            {selectedUnitMode === 'batches' && (
+              <label className="compact-field">
+                <span>Flavour</span>
+                <select
+                  value={selectedCheeseFlavor}
+                  onChange={e => onCheeseFlavorChange(e.target.value)}
+                >
+                  {Object.keys(CHEESE_CASES_PER_BATCH_BY_FLAVOR).map(flavor => (
+                    <option key={flavor} value={flavor}>{flavor}</option>
+                  ))}
+                </select>
+                <small>{formatAmountLabel(effectiveAmount, 'racks')} est.</small>
+              </label>
+            )}
+          </div>
+        )}
+        {isTapeCasesTask && (
+          <div className="cheese-conversion-controls">
+            <label className="compact-field">
+              <span>Unit</span>
+              <select
+                value={selectedUnitMode}
+                onChange={e => onUnitModeChange(e.target.value)}
+              >
+                <option value="cases">Cases / boxes</option>
+                <option value="cheesePallets">Cheese pallets</option>
+                <option value="dipPallets">Dip pallets</option>
+              </select>
+            </label>
+            {selectedUnitMode !== 'cases' && (
+              <small>{formatAmountLabel(effectiveAmount, 'cases')} est.</small>
+            )}
+          </div>
+        )}
         {MIXING_CHANGEOVER_TASK_IDS.has(task.id) && (
           <label className="compact-field process-amount-field">
             <span>flavours</span>
@@ -619,11 +1049,16 @@ function ProcessFolder({
   taskTemplates,
   employees,
   processSetups,
+  folderAmount,
   isExpanded,
   onToggle,
+  onFolderAmountChange,
   onAmountChange,
   onFlavorCountChange,
+  onUnitModeChange,
+  onCheeseFlavorChange,
   onEmployeeToggle,
+  onPrepAheadToggle,
 }) {
   return (
     <div className="run-setup-card">
@@ -644,6 +1079,17 @@ function ProcessFolder({
 
       {isExpanded && (
         <div className="run-setup-controls process-folder-controls">
+          {runTemplate.id === 'run-cheese-processing' && (
+            <label className="compact-field process-folder-main-field">
+              <span>All cheese batches</span>
+              <input
+                type="number"
+                min="1"
+                value={folderAmount || '1'}
+                onChange={e => onFolderAmountChange(e.target.value)}
+              />
+            </label>
+          )}
           {runTemplate.tasks.map(taskId => {
             const task = taskTemplates.find(t => t.id === taskId);
             if (!task) return null;
@@ -656,10 +1102,16 @@ function ProcessFolder({
                 employees={employees}
                 amount={setup.amount}
                 flavorCount={setup.flavorCount || '1'}
+                unitMode={setup.unitMode || 'racks'}
+                cheeseFlavor={setup.cheeseFlavor || 'Smoke'}
                 employeeIds={setup.employeeIds || []}
+                prepAhead={setup.prepAhead || false}
                 onAmountChange={amount => onAmountChange(taskId, amount)}
                 onFlavorCountChange={flavorCount => onFlavorCountChange(taskId, flavorCount)}
+                onUnitModeChange={unitMode => onUnitModeChange(taskId, unitMode)}
+                onCheeseFlavorChange={cheeseFlavor => onCheeseFlavorChange(taskId, cheeseFlavor)}
                 onEmployeeToggle={(employeeId, maxSelections) => onEmployeeToggle(taskId, employeeId, maxSelections)}
+                onPrepAheadToggle={() => onPrepAheadToggle(taskId)}
               />
             );
           })}
@@ -679,7 +1131,209 @@ function DropTimeHint({ hint }) {
   );
 }
 
+function DraggableMiscTemplate({
+  name,
+  duration,
+  onNameChange,
+  onDurationChange,
+}) {
+  const parsedDuration = Math.max(5, Number(duration) || 30);
+  const displayName = name.trim() || 'Misc Work';
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: 'misc-work-template',
+    data: {
+      type: 'misc-template',
+      name: displayName,
+      duration: parsedDuration,
+    },
+  });
+
+  return (
+    <div className="run-setup-card misc-setup-card">
+      <div
+        ref={setNodeRef}
+        {...listeners}
+        {...attributes}
+        className="task-template task-misc-work"
+        style={{ opacity: isDragging ? 0.5 : 1, marginBottom: 0, touchAction: 'none' }}
+      >
+        <div className="run-drag-handle" aria-hidden="true">
+          <GripVertical size={16} className="drag-handle-icon" />
+        </div>
+        <div className="task-content-wrapper">
+          <div className="task-title" style={{ fontSize: '0.875rem' }}>{displayName}</div>
+          <div className="task-meta">
+            <Clock size={12} />
+            {formatDuration(parsedDuration)}
+          </div>
+        </div>
+      </div>
+      <div className="run-setup-controls misc-setup-controls">
+        <label className="compact-field">
+          <span>Name</span>
+          <input
+            type="text"
+            value={name}
+            onChange={e => onNameChange(e.target.value)}
+            placeholder="Misc Work"
+          />
+        </label>
+        <label className="compact-field">
+          <span>Minutes</span>
+          <input
+            type="number"
+            min="5"
+            step="5"
+            value={duration}
+            onChange={e => onDurationChange(e.target.value)}
+          />
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function EmployeeCapacityHeader({
+  weekDays,
+  employees,
+  scheduledTasks,
+  availability,
+  onAvailabilityChange,
+}) {
+  const [expandedEmployeeKey, setExpandedEmployeeKey] = useState(null);
+
+  return (
+    <div className="capacity-strip">
+      <div className="capacity-time-cell">People</div>
+      {weekDays.map(day => {
+        const dayTasks = scheduledTasks.filter(task => task.dateStr === day.id);
+        const unassignedMinutes = dayTasks.reduce((sum, task) => (
+          getTaskEmployeeIds(task).length === 0 ? sum + task.duration : sum
+        ), 0);
+        const expandedEmployee = employees.find(employee => getAvailabilityKey(day.id, employee.id) === expandedEmployeeKey);
+        const expandedEmployeeIndex = employees.findIndex(employee => employee.id === expandedEmployee?.id);
+        const expandedAvailability = expandedEmployee
+          ? availability[expandedEmployeeKey] || DEFAULT_AVAILABILITY
+          : null;
+
+        return (
+          <div key={day.id} className="capacity-day-card">
+            <div className="capacity-day-topline">
+              <div className="capacity-day-title">{day.name}</div>
+              <div className={`capacity-unassigned ${unassignedMinutes > 0 ? 'has-unassigned' : ''}`}>
+                Unassigned {formatHours(unassignedMinutes)}
+              </div>
+            </div>
+            <div className="capacity-employee-list">
+              {employees.map((employee, employeeIndex) => {
+                const key = getAvailabilityKey(day.id, employee.id);
+                const employeeAvailability = availability[key] || DEFAULT_AVAILABILITY;
+                const assignedMinutes = dayTasks.reduce((sum, task) => (
+                  getTaskEmployeeIds(task).includes(employee.id) ? sum + task.duration : sum
+                ), 0);
+                const availableMinutes = getAvailableMinutes(employeeAvailability);
+                const statusClass = !employeeAvailability.isWorking
+                  ? 'is-off'
+                  : assignedMinutes > availableMinutes
+                    ? 'is-over'
+                    : assignedMinutes >= availableMinutes * 0.85
+                      ? 'is-tight'
+                      : 'is-ok';
+                const employeeKey = getAvailabilityKey(day.id, employee.id);
+                const isExpanded = expandedEmployeeKey === employeeKey;
+                const employeeColor = getEmployeeColor(employee, employeeIndex);
+
+                return (
+                  <div
+                    key={employee.id}
+                    className={`capacity-employee-row ${statusClass} ${isExpanded ? 'is-expanded' : ''}`}
+                    style={{ '--employee-color': employeeColor }}
+                  >
+                    <button
+                      type="button"
+                      className="capacity-employee-summary"
+                      onClick={() => setExpandedEmployeeKey(prev => prev === employeeKey ? null : employeeKey)}
+                    >
+                      <span className="capacity-employee-name">{employee.name}</span>
+                      <span className="capacity-hours">{formatHours(assignedMinutes)} / {formatHours(availableMinutes)}</span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            {expandedEmployee && expandedAvailability && (
+              <div
+                className="capacity-employee-details"
+                style={{ '--employee-color': getEmployeeColor(expandedEmployee, expandedEmployeeIndex) }}
+              >
+                <div className="capacity-details-name">{expandedEmployee.name}</div>
+                <label className="capacity-working-toggle">
+                  <input
+                    type="checkbox"
+                    checked={expandedAvailability.isWorking}
+                    onChange={e => onAvailabilityChange(day.id, expandedEmployee.id, { isWorking: e.target.checked })}
+                  />
+                  <span>Working today</span>
+                </label>
+                <div className="capacity-time-inputs">
+                  <label>
+                    <span>Start</span>
+                    <input
+                      type="time"
+                      value={expandedAvailability.start}
+                      disabled={!expandedAvailability.isWorking}
+                      onChange={e => onAvailabilityChange(day.id, expandedEmployee.id, { start: e.target.value })}
+                    />
+                  </label>
+                  <label>
+                    <span>End</span>
+                    <input
+                      type="time"
+                      value={expandedAvailability.end}
+                      disabled={!expandedAvailability.isWorking}
+                      onChange={e => onAvailabilityChange(day.id, expandedEmployee.id, { end: e.target.value })}
+                    />
+                  </label>
+                  <label>
+                    <span>Lunch</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="5"
+                      value={expandedAvailability.lunchMinutes ?? DEFAULT_AVAILABILITY.lunchMinutes}
+                      disabled={!expandedAvailability.isWorking}
+                      onChange={e => onAvailabilityChange(day.id, expandedEmployee.id, { lunchMinutes: e.target.value })}
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // Droppable Schedule Slot (Full Day)
+function LunchBlock() {
+  const lunchStartMins = LUNCH_START_ABSOLUTE_MINUTES - (SCHEDULE_START_HOUR * 60);
+  const top = (lunchStartMins / 60) * HOUR_ROW_HEIGHT;
+  const height = (LUNCH_DURATION_MINUTES / 60) * HOUR_ROW_HEIGHT;
+
+  return (
+    <div
+      className="lunch-block"
+      style={{
+        top: `${top}px`,
+        height: `${height}px`,
+      }}
+    >
+      Lunch
+    </div>
+  );
+}
+
 function DroppableDay({ dateStr, dragTimeHint, children }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `day-${dateStr}`,
@@ -699,6 +1353,7 @@ function DroppableDay({ dateStr, dragTimeHint, children }) {
       {hoursOfDay.map(hour => (
         <div key={hour} className="hour-slot" style={{ pointerEvents: 'none' }} />
       ))}
+      <LunchBlock />
       <DropTimeHint hint={dragTimeHint?.dateStr === dateStr ? dragTimeHint : null} />
       {children}
     </div>
@@ -709,13 +1364,16 @@ function DroppableDay({ dateStr, dragTimeHint, children }) {
 function layoutDayTasks(tasks) {
   if (tasks.length === 0) return [];
   
-  const getStartMins = (t) => (t.startHour - 7) * 60 + (t.startMinute || 0);
-  const getEndMins = (t) => getStartMins(t) + t.duration;
+  const getStartMins = (t) => moveStartOutOfLunch(getAbsoluteMinutes(t.startHour, t.startMinute || 0)) - (SCHEDULE_START_HOUR * 60);
+  const getEndMins = (t) => getStartMins(t) + getTaskElapsedMinutes(t);
 
   const sorted = [...tasks].sort((a, b) => {
     const startA = getStartMins(a);
     const startB = getStartMins(b);
     if (startA !== startB) return startA - startB;
+    const groupA = getTaskGroupLayoutRank(a.groupId);
+    const groupB = getTaskGroupLayoutRank(b.groupId);
+    if (groupA !== groupB) return groupA - groupB;
     return getEndMins(b) - getEndMins(a);
   });
 
@@ -724,8 +1382,20 @@ function layoutDayTasks(tasks) {
   const results = [];
 
   const packEvents = () => {
-    const numColumns = columns.length;
-    columns.forEach((col, colIdx) => {
+    const orderedColumns = columns
+      .map((col, originalIndex) => ({
+        col,
+        originalIndex,
+        groupRank: Math.min(...col.map(task => getTaskGroupLayoutRank(task.groupId))),
+        firstStart: Math.min(...col.map(task => getStartMins(task))),
+      }))
+      .sort((a, b) => {
+        if (a.groupRank !== b.groupRank) return a.groupRank - b.groupRank;
+        if (a.firstStart !== b.firstStart) return a.firstStart - b.firstStart;
+        return a.originalIndex - b.originalIndex;
+      });
+    const numColumns = orderedColumns.length;
+    orderedColumns.forEach(({ col }, colIdx) => {
       col.forEach(task => {
         results.push({
           task,
@@ -746,15 +1416,37 @@ function layoutDayTasks(tasks) {
       lastEventEnding = null;
     }
 
+    const availableColumns = columns
+      .map((col, index) => {
+        const lastEventInCol = col[col.length - 1];
+        return {
+          col,
+          index,
+          lastTask: lastEventInCol,
+          lastEnd: getEndMins(lastEventInCol),
+        };
+      })
+      .filter(item => item.lastEnd <= start)
+      .sort((a, b) => {
+        const aSameRun = a.lastTask.runId === task.runId ? 0 : 1;
+        const bSameRun = b.lastTask.runId === task.runId ? 0 : 1;
+        if (aSameRun !== bSameRun) return aSameRun - bSameRun;
+
+        const aSameGroup = a.lastTask.groupId === task.groupId ? 0 : 1;
+        const bSameGroup = b.lastTask.groupId === task.groupId ? 0 : 1;
+        if (aSameGroup !== bSameGroup) return aSameGroup - bSameGroup;
+
+        const aGap = start - a.lastEnd;
+        const bGap = start - b.lastEnd;
+        if (aGap !== bGap) return aGap - bGap;
+
+        return a.index - b.index;
+      });
+
     let placed = false;
-    for (let i = 0; i < columns.length; i++) {
-      const col = columns[i];
-      const lastEventInCol = col[col.length - 1];
-      if (getEndMins(lastEventInCol) <= start) {
-        col.push(task);
-        placed = true;
-        break;
-      }
+    if (availableColumns.length > 0) {
+      availableColumns[0].col.push(task);
+      placed = true;
     }
     
     if (!placed) {
@@ -797,13 +1489,41 @@ function PrintWeekSchedule({
     return run?.name || 'Single process';
   };
 
-  const getSortedTasksForDay = (dayId) => scheduledTasks
-    .filter(task => task.dateStr === dayId)
-    .sort((a, b) => {
-      const startA = (a.startHour * 60) + (a.startMinute || 0);
-      const startB = (b.startHour * 60) + (b.startMinute || 0);
-      return startA - startB;
+  const getRunSortDetails = (task, runStartByKey = new Map()) => {
+    const run = activeRuns.find(item => item.id === task.runId);
+    const runId = task.isAutomaticDaily ? `daily-${task.dateStr}` : (task.runId || task.id);
+    return {
+      groupRank: getTaskGroupLayoutRank(task.groupId),
+      runName: task.isAutomaticDaily ? 'Daily duties' : (run?.name || 'Single process'),
+      runId,
+      runStart: runStartByKey.get(runId) ?? ((task.startHour * 60) + (task.startMinute || 0)),
+      start: (task.startHour * 60) + (task.startMinute || 0),
+    };
+  };
+
+  const getSortedTasksForDay = (dayId) => {
+    const dayTasks = scheduledTasks.filter(task => task.dateStr === dayId);
+    const runStartByKey = dayTasks.reduce((map, task) => {
+      const runId = task.isAutomaticDaily ? `daily-${task.dateStr}` : (task.runId || task.id);
+      const start = (task.startHour * 60) + (task.startMinute || 0);
+      const existingStart = map.get(runId);
+      if (existingStart === undefined || start < existingStart) {
+        map.set(runId, start);
+      }
+      return map;
+    }, new Map());
+
+    return dayTasks.sort((a, b) => {
+      const detailsA = getRunSortDetails(a, runStartByKey);
+      const detailsB = getRunSortDetails(b, runStartByKey);
+
+      if (detailsA.groupRank !== detailsB.groupRank) return detailsA.groupRank - detailsB.groupRank;
+      if (detailsA.runStart !== detailsB.runStart) return detailsA.runStart - detailsB.runStart;
+      if (detailsA.runName !== detailsB.runName) return detailsA.runName.localeCompare(detailsB.runName);
+      if (detailsA.runId !== detailsB.runId) return detailsA.runId.localeCompare(detailsB.runId);
+      return detailsA.start - detailsB.start;
     });
+  };
 
   return (
     <section className="print-week">
@@ -829,32 +1549,34 @@ function PrintWeekSchedule({
               {dayTasks.length === 0 ? (
                 <div className="print-empty-day">No scheduled production.</div>
               ) : (
-                <table className="print-task-table">
-                  <thead>
-                    <tr>
-                      <th>Time</th>
-                      <th>Process</th>
-                      <th>Amount</th>
-                      <th>Work Time</th>
-                      <th>Employee</th>
-                      <th>Run</th>
-                      <th>Notes</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {dayTasks.map(task => (
-                      <tr key={task.id}>
-                        <td>{getTaskTimeRange(task)}</td>
-                        <td>{task.name}</td>
-                        <td>{task.inputAmount ? formatAmountLabel(task.inputAmount, task.inputUnit) : '-'}</td>
-                        <td>{formatDuration(task.duration)}</td>
-                        <td>{getAssignedEmployeeNames(task)}</td>
-                        <td>{getRunName(task)}</td>
-                        <td>{task.notes || '-'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div className="print-task-grid">
+                  <div className="print-task-row print-task-head">
+                    <div>Time</div>
+                    <div>Run</div>
+                    <div>Process</div>
+                    <div>Amount</div>
+                    <div>Work Time</div>
+                    <div>Employee</div>
+                    <div>Notes</div>
+                  </div>
+                  {dayTasks.map((task, index) => {
+                    const runName = getRunName(task);
+                    const previousRunName = index > 0 ? getRunName(dayTasks[index - 1]) : '';
+                    const isRunStart = index === 0 || runName !== previousRunName || task.runId !== dayTasks[index - 1].runId;
+
+                    return (
+                      <div key={task.id} className={`print-task-row${isRunStart ? ' print-run-start' : ''}`}>
+                        <div>{getTaskTimeRange(task)}</div>
+                        <div>{isRunStart ? runName : ''}</div>
+                        <div>{task.name}</div>
+                        <div>{task.inputAmount ? formatAmountLabel(task.inputAmount, task.inputUnit) : '-'}</div>
+                        <div>{formatDuration(task.duration)}</div>
+                        <div>{getAssignedEmployeeNames(task)}</div>
+                        <div>{task.notes || '-'}</div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </section>
           );
@@ -875,32 +1597,87 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
     .map(employeeId => employees.find(e => e.id === employeeId))
     .filter(Boolean);
   const hasUntrainedEmployee = assignedEmployees.some(emp => (emp.skills[scheduledTask.templateId] || 'untrained') === 'untrained');
-  
-  const height = Math.max((scheduledTask.duration / 60) * 80, 24);
-  const startMins = (scheduledTask.startHour - 7) * 60 + (scheduledTask.startMinute || 0);
-  const top = (startMins / 60) * 80;
+  const hasTimingAssumption = ASSUMPTION_FLAG_TASK_IDS.has(scheduledTask.templateId);
+  const segments = getTaskWorkSegments(scheduledTask);
+  const firstSegmentStart = segments[0]?.start || moveStartOutOfLunch(getAbsoluteMinutes(scheduledTask.startHour, scheduledTask.startMinute || 0));
+  const lastSegment = segments[segments.length - 1] || { start: firstSegmentStart, duration: scheduledTask.duration };
+  const top = ((firstSegmentStart - (SCHEDULE_START_HOUR * 60)) / 60) * HOUR_ROW_HEIGHT;
+  const elapsedHeight = Math.max((((lastSegment.start + lastSegment.duration) - firstSegmentStart) / 60) * HOUR_ROW_HEIGHT, 24);
 
   const leftPercent = layout ? layout.left : 0;
   const widthPercent = layout ? layout.width : 100;
+  const displayWidthPercent = scheduledTask.isAutomaticDaily && widthPercent < 50
+    ? Math.min(100 - leftPercent, widthPercent * 2)
+    : widthPercent;
 
   const timeString = getTaskTimeRange(scheduledTask);
+  const renderTaskContent = (height, isContinued = false) => (
+    <>
+      <div className="task-title task-title-with-employees" style={{ fontSize: widthPercent < 50 ? '0.75rem' : '0.875rem' }}>
+        <span>{isContinued ? `${scheduledTask.name} continued` : scheduledTask.name}</span>
+        {!isContinued && assignedEmployees.length > 0 && (
+          <span className="title-employee-dots" aria-label={assignedEmployees.map(emp => emp.name).join(', ')}>
+            {assignedEmployees.map(emp => {
+              const employeeIndex = employees.findIndex(item => item.id === emp.id);
+              return (
+                <span
+                  key={emp.id}
+                  className="title-employee-dot"
+                  style={{ backgroundColor: getEmployeeColor(emp, employeeIndex) }}
+                />
+              );
+            })}
+          </span>
+        )}
+      </div>
+      {!isContinued && (
+        <>
+          <div className="task-meta" style={{ marginBottom: '2px', fontSize: '0.7rem' }}>
+            {scheduledTask.inputAmount ? `${formatAmountLabel(scheduledTask.inputAmount, scheduledTask.inputUnit)} - ` : ''}{timeString} ({formatDuration(scheduledTask.duration)})
+          </div>
+          {assignedEmployees.length > 0 ? (
+            <div className="task-meta">
+              <Users size={12} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{assignedEmployees.map(emp => emp.name).join(', ')}</span>
+              {hasUntrainedEmployee && <AlertCircle size={12} color="var(--danger)" style={{ flexShrink: 0 }} />}
+            </div>
+          ) : (
+            <div className="task-meta" style={{ color: 'var(--danger)', fontWeight: 500 }}>
+              <AlertCircle size={12} style={{ flexShrink: 0 }} /> {widthPercent < 50 ? 'Un...' : 'Unassigned'}
+            </div>
+          )}
+          {scheduledTask.notes && height >= 58 && (
+            <div className="task-meta task-notes-preview">
+              <StickyNote size={12} />
+              <span>{scheduledTask.notes}</span>
+            </div>
+          )}
+          {hasTimingAssumption && height >= 78 && (
+            <div className="task-meta timing-assumption-preview">
+              <AlertCircle size={12} />
+              <span>Timing assumption</span>
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
 
   return (
     <div 
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      className={`scheduled-task task-${scheduledTask.groupId}`}
+      className="scheduled-task-wrapper"
       style={{ 
-        height: `${height - 2}px`, 
+        height: `${elapsedHeight}px`, 
         top: `${top + 1}px`,
-        left: `calc(${leftPercent}% + 2px)`,
-        width: `calc(${widthPercent}% - 4px)`,
+        left: `calc(${leftPercent}% + 1px)`,
+        width: `calc(${displayWidthPercent}% - 2px)`,
         opacity: isDragging ? 0.5 : 1,
         touchAction: 'none',
         position: 'absolute',
-        padding: height < 40 ? '2px 6px' : '0.5rem',
-        lineHeight: 1.2
+        lineHeight: 1.2,
       }}
       onClick={(e) => {
         if (!isDragging) {
@@ -909,26 +1686,25 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
         }
       }}
     >
-      <div className="task-title" style={{ fontSize: widthPercent < 50 ? '0.75rem' : '0.875rem' }}>{scheduledTask.name}</div>
-      <div className="task-meta" style={{ marginBottom: '2px', fontSize: '0.7rem' }}>
-        {scheduledTask.inputAmount ? `${formatAmountLabel(scheduledTask.inputAmount, scheduledTask.inputUnit)} - ` : ''}{timeString} ({formatDuration(scheduledTask.duration)})
-      </div>
-      {assignedEmployees.length > 0 ? (
-        <div className="task-meta">
-          <Users size={12} /> <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{assignedEmployees.map(emp => emp.name).join(', ')}</span>
-          {hasUntrainedEmployee && <AlertCircle size={12} color="var(--danger)" style={{ flexShrink: 0 }} />}
-        </div>
-      ) : (
-        <div className="task-meta" style={{ color: 'var(--danger)', fontWeight: 500 }}>
-          <AlertCircle size={12} style={{ flexShrink: 0 }} /> {widthPercent < 50 ? 'Un...' : 'Unassigned'}
-        </div>
-      )}
-      {scheduledTask.notes && height >= 58 && (
-        <div className="task-meta task-notes-preview">
-          <StickyNote size={12} />
-          <span>{scheduledTask.notes}</span>
-        </div>
-      )}
+      {segments.map((segment, index) => {
+        const segmentTop = ((segment.start - firstSegmentStart) / 60) * HOUR_ROW_HEIGHT;
+        const segmentHeight = Math.max((segment.duration / 60) * HOUR_ROW_HEIGHT, 24);
+        const showFullContent = index === 0;
+
+        return (
+          <div
+            key={`${scheduledTask.id}-segment-${index}`}
+            className={`scheduled-task scheduled-task-segment task-${scheduledTask.groupId}`}
+            style={{
+              height: `${segmentHeight - 2}px`,
+              top: `${segmentTop}px`,
+              padding: segmentHeight < 40 ? '2px 6px' : '0.5rem',
+            }}
+          >
+            {renderTaskContent(segmentHeight, !showFullContent)}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -963,8 +1739,13 @@ export default function App() {
   const [selectedEmployees, setSelectedEmployees] = useState([]);
   const [selectedRunAmount, setSelectedRunAmount] = useState('1');
   const [selectedNotes, setSelectedNotes] = useState('');
+  const [selectedCustomName, setSelectedCustomName] = useState('');
+  const [selectedCustomDuration, setSelectedCustomDuration] = useState('30');
   const [runSetups, setRunSetups] = useState(() => createInitialRunSetups());
   const [processSetups, setProcessSetups] = useState(() => createInitialProcessSetups());
+  const [employeeAvailability, setEmployeeAvailability] = useState({});
+  const [miscWorkName, setMiscWorkName] = useState('Misc Work');
+  const [miscWorkDuration, setMiscWorkDuration] = useState('30');
   const [expandedRunId, setExpandedRunId] = useState(null);
 
   const [activeDragItem, setActiveDragItem] = useState(null);
@@ -984,6 +1765,34 @@ export default function App() {
     });
   }, [weekDays]);
 
+  useEffect(() => {
+    setEmployeeAvailability(prev => {
+      let changed = false;
+      const next = { ...prev };
+      weekDays.forEach(day => {
+        employees.forEach(employee => {
+          const key = getAvailabilityKey(day.id, employee.id);
+          if (!next[key]) {
+            next[key] = { ...DEFAULT_AVAILABILITY };
+            changed = true;
+          }
+        });
+      });
+      return changed ? next : prev;
+    });
+  }, [employees, weekDays]);
+
+  const handleAvailabilityChange = (dayId, employeeId, patch) => {
+    const key = getAvailabilityKey(dayId, employeeId);
+    setEmployeeAvailability(prev => ({
+      ...prev,
+      [key]: {
+        ...(prev[key] || DEFAULT_AVAILABILITY),
+        ...patch,
+      },
+    }));
+  };
+
   const handleRunSetupAmountChange = (runTemplateId, amount) => {
     setRunSetups(prev => ({
       ...prev,
@@ -1000,6 +1809,29 @@ export default function App() {
       [runTemplateId]: {
         ...(prev[runTemplateId] || { amount: '1', assignments: {} }),
         flavorCount,
+      },
+    }));
+  };
+
+  const handleRunSetupCheeseFlavorChange = (runTemplateId, cheeseFlavor) => {
+    setRunSetups(prev => ({
+      ...prev,
+      [runTemplateId]: {
+        ...(prev[runTemplateId] || { amount: '1', assignments: {} }),
+        cheeseFlavor,
+      },
+    }));
+  };
+
+  const handleRunSetupCheeseFlavorsChange = (runTemplateId, cheeseFlavors) => {
+    const cheesePlan = getCheesePlan(cheeseFlavors);
+    setRunSetups(prev => ({
+      ...prev,
+      [runTemplateId]: {
+        ...(prev[runTemplateId] || { amount: '1', assignments: {} }),
+        amount: String(cheesePlan.totalBatches),
+        cheeseFlavor: cheesePlan.rows[0]?.flavor || 'Smoke',
+        cheeseFlavors: cheesePlan.rows,
       },
     }));
   };
@@ -1033,6 +1865,24 @@ export default function App() {
     });
   };
 
+  const handleRunSetupPrepAheadToggle = (runTemplateId, taskId) => {
+    setRunSetups(prev => {
+      const setup = prev[runTemplateId] || { prepAheadTaskIds: [] };
+      const current = setup.prepAheadTaskIds || [];
+      const prepAheadTaskIds = current.includes(taskId)
+        ? current.filter(id => id !== taskId)
+        : [...current, taskId];
+
+      return {
+        ...prev,
+        [runTemplateId]: {
+          ...setup,
+          prepAheadTaskIds,
+        },
+      };
+    });
+  };
+
   const handleProcessAmountChange = (taskId, amount) => {
     setProcessSetups(prev => ({
       ...prev,
@@ -1043,12 +1893,48 @@ export default function App() {
     }));
   };
 
+  const handleCheeseFolderAmountChange = (amount) => {
+    handleRunSetupAmountChange('run-cheese-processing', amount);
+    setProcessSetups(prev => {
+      const next = { ...prev };
+      CHEESE_BATCH_SHARED_TASK_IDS.forEach(taskId => {
+        const currentSetup = next[taskId] || { employeeIds: [] };
+        next[taskId] = {
+          ...currentSetup,
+          amount,
+          ...(CHEESE_BATCH_CONVERTIBLE_TASK_IDS.has(taskId) ? { unitMode: 'batches' } : {}),
+        };
+      });
+      return next;
+    });
+  };
+
   const handleProcessFlavorCountChange = (taskId, flavorCount) => {
     setProcessSetups(prev => ({
       ...prev,
       [taskId]: {
         ...(prev[taskId] || { employeeIds: [] }),
         flavorCount,
+      },
+    }));
+  };
+
+  const handleProcessUnitModeChange = (taskId, unitMode) => {
+    setProcessSetups(prev => ({
+      ...prev,
+      [taskId]: {
+        ...(prev[taskId] || { employeeIds: [] }),
+        unitMode,
+      },
+    }));
+  };
+
+  const handleProcessCheeseFlavorChange = (taskId, cheeseFlavor) => {
+    setProcessSetups(prev => ({
+      ...prev,
+      [taskId]: {
+        ...(prev[taskId] || { employeeIds: [] }),
+        cheeseFlavor,
       },
     }));
   };
@@ -1069,6 +1955,19 @@ export default function App() {
         [taskId]: {
           ...setup,
           employeeIds,
+        },
+      };
+    });
+  };
+
+  const handleProcessPrepAheadToggle = (taskId) => {
+    setProcessSetups(prev => {
+      const setup = prev[taskId] || { amount: '1', employeeIds: [] };
+      return {
+        ...prev,
+        [taskId]: {
+          ...setup,
+          prepAhead: !setup.prepAhead,
         },
       };
     });
@@ -1125,20 +2024,24 @@ export default function App() {
         const runId = uuidv4();
         const inputAmount = Math.max(1, Number(active.data.current.inputAmount) || 1);
         const flavorCount = Math.max(1, Number(active.data.current.flavorCount) || 1);
+        const cheeseFlavor = active.data.current.cheeseFlavor || 'Smoke';
+        const cheeseFlavors = active.data.current.cheeseFlavors || null;
+        const cheesePlan = getCheesePlan(cheeseFlavors, inputAmount, cheeseFlavor);
         const defaultEmployeeId = active.data.current.defaultEmployeeId || '';
         const assignments = active.data.current.assignments || {};
-        const layoutOffsets = getRunLayout(runTemplate, inputAmount, flavorCount);
+        const prepAheadTaskIds = active.data.current.prepAheadTaskIds || [];
+        const layoutOffsets = getRunLayout(runTemplate, inputAmount, flavorCount, cheeseFlavor, assignments, cheeseFlavors);
 
-        const newTasks = getRunTaskIds(runTemplate).map(taskId => {
+        const newTasks = getActiveRunTaskIds(runTemplate, prepAheadTaskIds).map(taskId => {
           const template = taskTemplates.find(t => t.id === taskId);
           if (!template) return null;
 
-          const taskAmount = getTaskAmountForRun(taskId, inputAmount, flavorCount);
+          const taskAmount = getTaskAmountForRun(taskId, inputAmount, flavorCount, cheeseFlavor, cheeseFlavors);
           if (taskAmount <= 0) return null;
 
           const taskStart = addMinutesToStart(startHour, startMinute, layoutOffsets[taskId] || 0);
           const employeeIds = assignments[template.id] || (defaultEmployeeId ? [defaultEmployeeId] : []);
-          const duration = getRunTaskDuration(runTemplate, taskId, inputAmount, flavorCount, employeeIds);
+          const duration = getRunTaskDuration(runTemplate, taskId, inputAmount, flavorCount, employeeIds, cheeseFlavor, cheeseFlavors);
 
           return {
             id: uuidv4(),
@@ -1154,7 +2057,13 @@ export default function App() {
             inputAmount: taskAmount,
             inputUnit: template.unitName,
             buckets: taskAmount,
-            notes: '',
+            notes: runTemplate.id === 'run-cheese-processing' && CHEESE_BATCH_CONVERTIBLE_TASK_IDS.has(taskId)
+              ? getTaskDefaultNote(template, cheesePlan.summary)
+              : getTaskDefaultNote(template),
+            sourceAmount: runTemplate.id === 'run-cheese-processing' ? cheesePlan.totalBatches : undefined,
+            sourceUnitMode: runTemplate.id === 'run-cheese-processing' ? 'batches' : undefined,
+            cheeseFlavor: runTemplate.id === 'run-cheese-processing' ? cheeseFlavor : undefined,
+            cheeseFlavors: runTemplate.id === 'run-cheese-processing' ? cheesePlan.rows : undefined,
           };
         }).filter(Boolean);
 
@@ -1164,6 +2073,8 @@ export default function App() {
           templateId: runTemplate.id,
           inputAmount,
           flavorCount,
+          cheeseFlavor,
+          cheeseFlavors: runTemplate.id === 'run-cheese-processing' ? cheesePlan.rows : undefined,
           defaultEmployeeId,
           name: getRunDisplayName(runTemplate, inputAmount, runTemplate.inputUnit),
           groupId: runTemplate.groupId,
@@ -1177,9 +2088,18 @@ export default function App() {
         const runId = uuidv4();
         const inputAmount = Math.max(1, Number(active.data.current.inputAmount) || 1);
         const flavorCount = Math.max(1, Number(active.data.current.flavorCount) || 1);
+        const unitMode = active.data.current.unitMode || 'racks';
+        const cheeseFlavor = active.data.current.cheeseFlavor || 'Smoke';
+        const effectiveAmount = Math.max(1, Number(active.data.current.effectiveAmount) || inputAmount);
         const inputUnit = template.unitName;
         const employeeIds = active.data.current.employeeIds || [];
-        const duration = getProcessTaskDuration(template, inputAmount, employeeIds, flavorCount);
+        const duration = getProcessTaskDuration(template, inputAmount, employeeIds, flavorCount, unitMode, cheeseFlavor);
+        const sourceAmountLabel = CHEESE_BATCH_CONVERTIBLE_TASK_IDS.has(template.id) && unitMode === 'batches'
+          ? `${formatAmountLabel(inputAmount, 'batches')} ${cheeseFlavor}`
+          : template.id === TAPE_CASES_TASK_ID && unitMode !== 'cases'
+          ? `${formatAmountLabel(inputAmount, 'pallets')} ${unitMode === 'cheesePallets' ? 'cheese' : 'dip'}`
+          : '';
+        const defaultNote = getTaskDefaultNote(template, sourceAmountLabel);
 
         setScheduledTasks(prev => [...prev, {
           id: uuidv4(),
@@ -1192,22 +2112,60 @@ export default function App() {
           startMinute,
           duration,
           employeeIds,
-          inputAmount,
+          inputAmount: effectiveAmount,
           flavorCount,
           inputUnit,
-          buckets: inputAmount,
-          notes: '',
+          buckets: effectiveAmount,
+          notes: defaultNote,
+          sourceAmount: inputAmount,
+          sourceUnitMode: unitMode,
+          cheeseFlavor,
         }]);
         setActiveRuns(prev => [...prev, {
           id: runId,
           templateId: null,
-          inputAmount,
+          inputAmount: effectiveAmount,
           flavorCount,
           inputUnit,
           baseName: template.name,
-          name: getRunDisplayName(null, inputAmount, inputUnit, template.name),
+          name: getRunDisplayName(null, effectiveAmount, inputUnit, template.name),
           groupId: template.groupId,
-          buckets: inputAmount,
+          buckets: effectiveAmount,
+        }]);
+      }
+
+      if (active.data.current?.type === 'misc-template') {
+        const template = taskTemplates.find(t => t.id === 'task-misc-work');
+        const runId = uuidv4();
+        const duration = Math.max(5, Number(active.data.current.duration) || 30);
+        const name = active.data.current.name || 'Misc Work';
+
+        setScheduledTasks(prev => [...prev, {
+          id: uuidv4(),
+          runId,
+          templateId: template?.id || 'task-misc-work',
+          groupId: template?.groupId || 'misc-work',
+          name,
+          dateStr,
+          startHour,
+          startMinute,
+          duration,
+          employeeIds: [],
+          inputAmount: 1,
+          inputUnit: 'block',
+          buckets: 1,
+          notes: '',
+          isCustomWork: true,
+        }]);
+        setActiveRuns(prev => [...prev, {
+          id: runId,
+          templateId: null,
+          inputAmount: 1,
+          inputUnit: 'block',
+          baseName: name,
+          name: getRunDisplayName(null, 1, 'block', name),
+          groupId: template?.groupId || 'misc-work',
+          buckets: 1,
         }]);
       }
       
@@ -1230,6 +2188,8 @@ export default function App() {
     const activeRun = activeRuns.find(r => r.id === assigningTask.runId);
     const runTemplate = runTemplates.find(rt => rt.id === activeRun?.templateId);
     const inputUnit = runTemplate?.inputUnit || assigningTask.inputUnit || activeRun?.inputUnit || 'units';
+    const customName = selectedCustomName.trim() || assigningTask.name;
+    const customDuration = Math.max(5, Number(selectedCustomDuration) || assigningTask.duration || 30);
 
     setActiveRuns(prev => prev.map(run => run.id === assigningTask.runId
       ? {
@@ -1237,7 +2197,10 @@ export default function App() {
           inputAmount,
           inputUnit,
           buckets: inputAmount,
-          name: getRunDisplayName(runTemplate, inputAmount, inputUnit, run.baseName || assigningTask.name),
+          baseName: assigningTask.isCustomWork ? customName : run.baseName,
+          name: assigningTask.isCustomWork
+            ? getRunDisplayName(null, 1, 'block', customName)
+            : getRunDisplayName(runTemplate, inputAmount, inputUnit, run.baseName || assigningTask.name),
         }
       : run
     ));
@@ -1254,15 +2217,24 @@ export default function App() {
       const firstTask = runTasks[0];
       const updates = new Map();
       const flavorCount = Math.max(1, Number(activeRun?.flavorCount || assigningTask.flavorCount) || 1);
-      const layoutOffsets = runTemplate ? getRunLayout(runTemplate, inputAmount, flavorCount) : {};
+      const cheeseFlavor = activeRun?.cheeseFlavor || assigningTask.cheeseFlavor || 'Smoke';
+      const cheeseFlavors = activeRun?.cheeseFlavors || assigningTask.cheeseFlavors || null;
+      const cheesePlan = getCheesePlan(cheeseFlavors, inputAmount, cheeseFlavor);
+      const layoutAssignments = Object.fromEntries(runTasks.map(t => [
+        t.templateId,
+        t.id === assigningTask.id ? selectedEmployees : (t.employeeIds || []),
+      ]));
+      const layoutOffsets = runTemplate ? getRunLayout(runTemplate, inputAmount, flavorCount, cheeseFlavor, layoutAssignments, cheeseFlavors) : {};
 
       runTasks.forEach(t => {
         const template = taskTemplates.find(tt => tt.id === t.templateId);
-        const taskAmount = getTaskAmountForRun(t.templateId, inputAmount, flavorCount);
+        const taskAmount = getTaskAmountForRun(t.templateId, inputAmount, flavorCount, cheeseFlavor, cheeseFlavors);
         const employeeIds = t.id === assigningTask.id ? selectedEmployees : (t.employeeIds || []);
-        const duration = template
+        const duration = t.isCustomWork
+          ? (t.id === assigningTask.id ? customDuration : t.duration)
+          : template
           ? runTemplate
-            ? getRunTaskDuration(runTemplate, t.templateId, inputAmount, flavorCount, employeeIds)
+            ? getRunTaskDuration(runTemplate, t.templateId, inputAmount, flavorCount, employeeIds, cheeseFlavor, cheeseFlavors)
             : getProcessTaskDuration(template, inputAmount, employeeIds, flavorCount)
           : t.duration;
         const taskStart = firstTask
@@ -1271,6 +2243,7 @@ export default function App() {
 
         updates.set(t.id, {
           ...t,
+          name: t.isCustomWork && t.id === assigningTask.id ? customName : t.name,
           dateStr: firstTask?.dateStr || t.dateStr,
           startHour: taskStart.startHour,
           startMinute: taskStart.startMinute,
@@ -1281,6 +2254,10 @@ export default function App() {
           duration,
           employeeIds,
           notes: t.id === assigningTask.id ? selectedNotes.trim() : (t.notes || ''),
+          cheeseFlavor: runTemplate?.id === 'run-cheese-processing' ? cheeseFlavor : t.cheeseFlavor,
+          cheeseFlavors: runTemplate?.id === 'run-cheese-processing' ? cheesePlan.rows : t.cheeseFlavors,
+          sourceAmount: runTemplate?.id === 'run-cheese-processing' ? cheesePlan.totalBatches : t.sourceAmount,
+          sourceUnitMode: runTemplate?.id === 'run-cheese-processing' ? 'batches' : t.sourceUnitMode,
         });
       });
 
@@ -1367,7 +2344,6 @@ export default function App() {
                     runTemplate.id === 'run-dip-mixing'
                     || runTemplate.id === 'run-veg-prep'
                     || runTemplate.id === 'run-packaging-prep'
-                    || runTemplate.id === 'run-cheese-processing'
                   ) {
                     return (
                       <ProcessFolder
@@ -1376,11 +2352,16 @@ export default function App() {
                         taskTemplates={taskTemplates}
                         employees={employees}
                         processSetups={processSetups}
+                        folderAmount={runSetup.amount || '1'}
                         isExpanded={expandedRunId === runTemplate.id}
                         onToggle={() => setExpandedRunId(prev => prev === runTemplate.id ? null : runTemplate.id)}
+                        onFolderAmountChange={runTemplate.id === 'run-cheese-processing' ? handleCheeseFolderAmountChange : amount => handleRunSetupAmountChange(runTemplate.id, amount)}
                         onAmountChange={handleProcessAmountChange}
                         onFlavorCountChange={handleProcessFlavorCountChange}
+                        onUnitModeChange={handleProcessUnitModeChange}
+                        onCheeseFlavorChange={handleProcessCheeseFlavorChange}
                         onEmployeeToggle={handleProcessEmployeeToggle}
+                        onPrepAheadToggle={handleProcessPrepAheadToggle}
                       />
                     );
                   }
@@ -1393,17 +2374,29 @@ export default function App() {
                       employees={employees}
                       amount={runSetup.amount}
                       flavorCount={runSetup.flavorCount || '1'}
+                      cheeseFlavor={runSetup.cheeseFlavor || 'Smoke'}
+                      cheeseFlavors={runSetup.cheeseFlavors || DEFAULT_CHEESE_FLAVORS}
                       defaultEmployeeId={runSetup.defaultEmployeeId || ''}
                       assignments={runSetup.assignments}
+                      prepAheadTaskIds={runSetup.prepAheadTaskIds || []}
                       isExpanded={expandedRunId === runTemplate.id}
                       onToggle={() => setExpandedRunId(prev => prev === runTemplate.id ? null : runTemplate.id)}
                       onAmountChange={amount => handleRunSetupAmountChange(runTemplate.id, amount)}
                       onFlavorCountChange={flavorCount => handleRunSetupFlavorCountChange(runTemplate.id, flavorCount)}
+                      onCheeseFlavorChange={cheeseFlavor => handleRunSetupCheeseFlavorChange(runTemplate.id, cheeseFlavor)}
+                      onCheeseFlavorsChange={cheeseFlavors => handleRunSetupCheeseFlavorsChange(runTemplate.id, cheeseFlavors)}
                       onDefaultEmployeeChange={employeeId => handleRunSetupDefaultEmployeeChange(runTemplate.id, employeeId)}
                       onAssignmentChange={(taskId, employeeId) => handleRunSetupAssignmentChange(runTemplate.id, taskId, employeeId)}
+                      onPrepAheadToggle={taskId => handleRunSetupPrepAheadToggle(runTemplate.id, taskId)}
                     />
                   );
                 })}
+                <DraggableMiscTemplate
+                  name={miscWorkName}
+                  duration={miscWorkDuration}
+                  onNameChange={setMiscWorkName}
+                  onDurationChange={setMiscWorkDuration}
+                />
               </div>
 
               <div style={{ marginTop: '2rem' }}>
@@ -1478,6 +2471,14 @@ export default function App() {
             </div>
           </div>
 
+          <EmployeeCapacityHeader
+            weekDays={weekDays}
+            employees={employees}
+            scheduledTasks={scheduledTasks}
+            availability={employeeAvailability}
+            onAvailabilityChange={handleAvailabilityChange}
+          />
+
           <div className="schedule-grid-container">
             <div className="schedule-grid">
               {/* Header Row (Row 1) */}
@@ -1511,6 +2512,8 @@ export default function App() {
                           setSelectedEmployees(task.employeeIds || (task.employeeId ? [task.employeeId] : []));
                           setSelectedRunAmount(String(task.inputAmount || task.buckets || activeRuns.find(run => run.id === task.runId)?.inputAmount || 1));
                           setSelectedNotes(task.notes || '');
+                          setSelectedCustomName(task.name || 'Misc Work');
+                          setSelectedCustomDuration(String(task.duration || 30));
                           setIsAssignModalOpen(true);
                         }}
                       />
@@ -1546,16 +2549,41 @@ export default function App() {
               <h3>Edit Schedule</h3>
               <p style={{ marginBottom: '1rem', color: 'var(--text-muted)' }}>{assigningTask.name} ({formatDuration(assigningTask.duration)})</p>
               <form onSubmit={handleAssignSubmit}>
-                <div className="form-group">
-                  <label>Run amount (updates this whole run)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={selectedRunAmount}
-                    onChange={e => setSelectedRunAmount(e.target.value)}
-                    required
-                  />
-                </div>
+                {assigningTask.isCustomWork ? (
+                  <>
+                    <div className="form-group">
+                      <label>Block name</label>
+                      <input
+                        type="text"
+                        value={selectedCustomName}
+                        onChange={e => setSelectedCustomName(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Duration minutes</label>
+                      <input
+                        type="number"
+                        min="5"
+                        step="5"
+                        value={selectedCustomDuration}
+                        onChange={e => setSelectedCustomDuration(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="form-group">
+                    <label>Run amount (updates this whole run)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={selectedRunAmount}
+                      onChange={e => setSelectedRunAmount(e.target.value)}
+                      required
+                    />
+                  </div>
+                )}
                 <div className="form-group">
                   <label>People assigned to this block</label>
                   <div className="checkbox-list">
@@ -1591,6 +2619,22 @@ export default function App() {
                 </div>
                 <div className="form-group">
                   <label>Notes</label>
+                  <div className="quick-note-actions">
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setSelectedNotes(prev => mergeNotes(prev, 'Carryover from previous day.'))}
+                    >
+                      From yesterday
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setSelectedNotes(prev => mergeNotes(prev, 'Prep for next day.'))}
+                    >
+                      For tomorrow
+                    </button>
+                  </div>
                   <textarea
                     className="notes-field"
                     value={selectedNotes}
@@ -1640,6 +2684,17 @@ export default function App() {
                     activeDragItem.data.current.inputAmount,
                     activeDragItem.data.current.taskTemplate.unitName
                   )}
+                </div>
+              </div>
+            </div>
+          ) : activeDragItem.data.current?.type === 'misc-template' ? (
+            <div className="task-template task-misc-work" style={{ margin: 0, opacity: 0.9, width: '260px', pointerEvents: 'none' }}>
+              <GripVertical size={16} className="drag-handle-icon" />
+              <div className="task-content-wrapper">
+                <div className="task-title" style={{ fontSize: '0.875rem' }}>{activeDragItem.data.current.name}</div>
+                <div className="task-meta">
+                  <Clock size={12} />
+                  {formatDuration(activeDragItem.data.current.duration)}
                 </div>
               </div>
             </div>

@@ -1,11 +1,14 @@
 import { Plus, Trash2 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 
+const employeeColorOptions = ['#EB4213', '#FF99DC', '#826DEE', '#D8F382', '#00C2A8', '#FFB000', '#3A86FF', '#F97316'];
+
 export default function TeamManagement({ employees, setEmployees, taskTemplates, runTemplates }) {
   const handleAddEmployee = () => {
     const newEmp = {
       id: uuidv4(),
       name: 'New Employee',
+      color: employeeColorOptions[employees.length % employeeColorOptions.length],
       skills: {}
     };
     setEmployees([...employees, newEmp]);
