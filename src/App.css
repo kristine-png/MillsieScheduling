@@ -415,26 +415,6 @@
   color: var(--text-muted);
 }
 
-.prep-ahead-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 0.68rem;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.prep-ahead-toggle input {
-  width: 13px;
-  height: 13px;
-}
-
-.prep-ahead-toggle-inline {
-  justify-self: start;
-}
-
 .run-assignment-row select {
   width: 100%;
   padding: 0.45rem 0.55rem;

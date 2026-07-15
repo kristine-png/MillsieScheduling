@@ -95,13 +95,6 @@ const TAPE_CASES_PER_PALLET_BY_UNIT_MODE = {
   dipPallets: 56 * CASES_PER_TAPE_BUNDLE,
 };
 const DEFAULT_CHEESE_FLAVORS = [{ id: 'cheese-flavor-1', flavor: 'Smoke', batches: '1', lotCode: '' }];
-const PREP_AHEAD_TASK_IDS = new Set([
-  'task-sanitation',
-  'task-stickering',
-  'task-date-containers',
-  'task-sticker-lids',
-  TAPE_CASES_TASK_ID,
-]);
 const ASSUMPTION_FLAG_TASK_IDS = new Set([
   TAPE_CASES_TASK_ID,
   'task-cheese-dipping',
@@ -506,6 +499,7 @@ function getDropTimeFromDrag(active, over) {
 }
 
 function getTaskAmountForRun(taskId, amount, flavorCount = 1, cheeseFlavor = 'Smoke', cheeseFlavors = null) {
+  void flavorCount;
   if (CHEESE_BATCH_SHARED_TASK_IDS.has(taskId) && cheeseFlavors) {
     const cheesePlan = getCheesePlan(cheeseFlavors, amount, cheeseFlavor);
     return CHEESE_BATCH_CONVERTIBLE_TASK_IDS.has(taskId)
@@ -524,7 +518,7 @@ function hasFlavorCountField(runTemplateId) {
     || runTemplateId === 'run-dip-mixing';
 }
 
-function hasDefaultEmployeeField(runTemplateId) {
+function hasDefaultEmployeeField() {
   return false;
 }
 
@@ -600,7 +594,6 @@ function DraggableRunTemplate({
   onCheeseFlavorsChange,
   onDefaultEmployeeChange,
   onAssignmentChange,
-  onPrepAheadToggle,
 }) {
   const parsedAmount = Math.max(1, Number(amount) || 1);
   const parsedFlavorCount = Math.max(1, Number(flavorCount) || 1);
@@ -783,7 +776,6 @@ function DraggableRunTemplate({
             const task = taskTemplates.find(t => t.id === taskId);
             if (!task) return null;
             const selectedEmployeeIds = assignments[taskId] || [];
-            const isPrepAhead = (prepAheadTaskIds || []).includes(taskId);
             const overrideEmployeeId = selectedEmployeeIds[0] || '';
             const defaultEmployee = employees.find(emp => emp.id === defaultEmployeeId);
             const defaultOptionLabel = defaultEmployee
@@ -795,16 +787,6 @@ function DraggableRunTemplate({
               <div key={taskId} className="run-assignment-row">
                 <div className="run-assignment-heading">
                   <label className="run-assignment-name" htmlFor={`${runTemplate.id}-${taskId}-employee`}>{task.name}</label>
-                  {PREP_AHEAD_TASK_IDS.has(taskId) && (
-                    <label className="prep-ahead-toggle">
-                      <input
-                        type="checkbox"
-                        checked={isPrepAhead}
-                        onChange={() => onPrepAheadToggle(taskId)}
-                      />
-                      <span>Done day before</span>
-                    </label>
-                  )}
                 </div>
                 {task.assignmentRoles ? (
                   <div className="role-assignment-list">
@@ -880,7 +862,6 @@ function DraggableProcessTemplate({
   onUnitModeChange,
   onCheeseFlavorChange,
   onEmployeeToggle,
-  onPrepAheadToggle,
 }) {
   const parsedAmount = Math.max(1, Number(amount) || 1);
   const parsedFlavorCount = Math.max(1, Number(flavorCount) || 1);
@@ -921,7 +902,7 @@ function DraggableProcessTemplate({
         {...listeners}
         {...attributes}
         className={`task-template task-${task.groupId} process-task-card`}
-        style={{ opacity: prepAhead ? 0.55 : (isDragging ? 0.5 : 1), marginBottom: 0, touchAction: 'none' }}
+        style={{ opacity: isDragging ? 0.5 : 1, marginBottom: 0, touchAction: 'none' }}
       >
         <div className="run-drag-handle" aria-hidden="true">
           <GripVertical size={16} className="drag-handle-icon" />
@@ -932,21 +913,11 @@ function DraggableProcessTemplate({
             <Clock size={12} />
             {formatAmountLabel(parsedAmount, displayUnitName)}
             {isTapeCasesTask && selectedUnitMode !== 'cases' ? ` -> ${formatAmountLabel(effectiveAmount, 'cases')}` : ''}
-            {isCheeseConvertible && selectedUnitMode === 'batches' ? ` -> ${formatAmountLabel(effectiveAmount, task.unitName)}` : ''}, {prepAhead ? 'done day before' : formatDuration(duration)}
+            {isCheeseConvertible && selectedUnitMode === 'batches' ? ` -> ${formatAmountLabel(effectiveAmount, task.unitName)}` : ''}, {formatDuration(duration)}
           </div>
         </div>
       </div>
       <div className="process-setup-controls">
-        {PREP_AHEAD_TASK_IDS.has(task.id) && (
-          <label className="prep-ahead-toggle prep-ahead-toggle-inline">
-            <input
-              type="checkbox"
-              checked={Boolean(prepAhead)}
-              onChange={onPrepAheadToggle}
-            />
-            <span>Done day before</span>
-          </label>
-        )}
         <label className="compact-field process-amount-field">
           <span>{getDisplayUnit(parsedAmount, displayUnitName)}</span>
           <input
@@ -1079,7 +1050,6 @@ function ProcessFolder({
   onUnitModeChange,
   onCheeseFlavorChange,
   onEmployeeToggle,
-  onPrepAheadToggle,
 }) {
   return (
     <div className="run-setup-card">
@@ -1132,7 +1102,6 @@ function ProcessFolder({
                 onUnitModeChange={unitMode => onUnitModeChange(taskId, unitMode)}
                 onCheeseFlavorChange={cheeseFlavor => onCheeseFlavorChange(taskId, cheeseFlavor)}
                 onEmployeeToggle={(employeeId, maxSelections) => onEmployeeToggle(taskId, employeeId, maxSelections)}
-                onPrepAheadToggle={() => onPrepAheadToggle(taskId)}
               />
             );
           })}
@@ -1892,24 +1861,6 @@ export default function App() {
     });
   };
 
-  const handleRunSetupPrepAheadToggle = (runTemplateId, taskId) => {
-    setRunSetups(prev => {
-      const setup = prev[runTemplateId] || { prepAheadTaskIds: [] };
-      const current = setup.prepAheadTaskIds || [];
-      const prepAheadTaskIds = current.includes(taskId)
-        ? current.filter(id => id !== taskId)
-        : [...current, taskId];
-
-      return {
-        ...prev,
-        [runTemplateId]: {
-          ...setup,
-          prepAheadTaskIds,
-        },
-      };
-    });
-  };
-
   const handleProcessAmountChange = (taskId, amount) => {
     setProcessSetups(prev => ({
       ...prev,
@@ -1982,19 +1933,6 @@ export default function App() {
         [taskId]: {
           ...setup,
           employeeIds,
-        },
-      };
-    });
-  };
-
-  const handleProcessPrepAheadToggle = (taskId) => {
-    setProcessSetups(prev => {
-      const setup = prev[taskId] || { amount: '1', employeeIds: [] };
-      return {
-        ...prev,
-        [taskId]: {
-          ...setup,
-          prepAhead: !setup.prepAhead,
         },
       };
     });
@@ -2388,7 +2326,6 @@ export default function App() {
                         onUnitModeChange={handleProcessUnitModeChange}
                         onCheeseFlavorChange={handleProcessCheeseFlavorChange}
                         onEmployeeToggle={handleProcessEmployeeToggle}
-                        onPrepAheadToggle={handleProcessPrepAheadToggle}
                       />
                     );
                   }
@@ -2414,7 +2351,6 @@ export default function App() {
                       onCheeseFlavorsChange={cheeseFlavors => handleRunSetupCheeseFlavorsChange(runTemplate.id, cheeseFlavors)}
                       onDefaultEmployeeChange={employeeId => handleRunSetupDefaultEmployeeChange(runTemplate.id, employeeId)}
                       onAssignmentChange={(taskId, employeeId) => handleRunSetupAssignmentChange(runTemplate.id, taskId, employeeId)}
-                      onPrepAheadToggle={taskId => handleRunSetupPrepAheadToggle(runTemplate.id, taskId)}
                     />
                   );
                 })}
