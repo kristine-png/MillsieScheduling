@@ -94,7 +94,7 @@ const TAPE_CASES_PER_PALLET_BY_UNIT_MODE = {
   cheesePallets: 84 * CASES_PER_TAPE_BUNDLE,
   dipPallets: 56 * CASES_PER_TAPE_BUNDLE,
 };
-const DEFAULT_CHEESE_FLAVORS = [{ id: 'cheese-flavor-1', flavor: 'Smoke', batches: '1' }];
+const DEFAULT_CHEESE_FLAVORS = [{ id: 'cheese-flavor-1', flavor: 'Smoke', batches: '1', lotCode: '' }];
 const PREP_AHEAD_TASK_IDS = new Set([
   'task-sanitation',
   'task-stickering',
@@ -199,12 +199,13 @@ function getCheeseRackEstimate(batchCount, flavor) {
 function normalizeCheeseFlavors(cheeseFlavors, fallbackAmount = 1, fallbackFlavor = 'Smoke') {
   const rows = Array.isArray(cheeseFlavors) && cheeseFlavors.length > 0
     ? cheeseFlavors
-    : [{ id: 'cheese-flavor-1', flavor: fallbackFlavor || 'Smoke', batches: String(fallbackAmount || 1) }];
+    : [{ id: 'cheese-flavor-1', flavor: fallbackFlavor || 'Smoke', batches: String(fallbackAmount || 1), lotCode: '' }];
 
   return rows.map((row, index) => ({
     id: row.id || `cheese-flavor-${index + 1}`,
     flavor: row.flavor || 'Smoke',
     batches: Math.max(1, Number(row.batches) || 1),
+    lotCode: String(row.lotCode || '').trim(),
   }));
 }
 
@@ -215,6 +216,13 @@ function getCheesePlan(cheeseFlavors, fallbackAmount = 1, fallbackFlavor = 'Smok
   const summary = rows.map(row => `${formatAmountLabel(row.batches, 'batches')} ${row.flavor}`).join(', ');
 
   return { rows, totalBatches, totalRacks, summary };
+}
+
+function getCheeseFlavorLotLabel(cheeseFlavors) {
+  if (!Array.isArray(cheeseFlavors) || cheeseFlavors.length === 0) return '';
+  return cheeseFlavors
+    .map(row => `${row.flavor || 'Cheese'}${row.lotCode ? ` · Lot ${row.lotCode}` : ' · Lot —'}`)
+    .join(' / ');
 }
 
 function getCheeseProcessAmount(task, amount, unitMode = 'racks', flavor = 'Smoke') {
@@ -698,6 +706,19 @@ function DraggableRunTemplate({
                   ))}
                 </select>
                 <input
+                  className="cheese-lot-input"
+                  type="text"
+                  value={row.lotCode}
+                  placeholder="Lot code"
+                  aria-label={`${row.flavor} lot code`}
+                  onChange={e => {
+                    const nextRows = cheesePlan.rows.map(item => (
+                      item.id === row.id ? { ...item, lotCode: e.target.value } : item
+                    ));
+                    onCheeseFlavorsChange(nextRows);
+                  }}
+                />
+                <input
                   type="number"
                   min="1"
                   value={row.batches}
@@ -730,7 +751,7 @@ function DraggableRunTemplate({
               onClick={() => {
                 const nextRows = [
                   ...cheesePlan.rows,
-                  { id: `cheese-flavor-${Date.now()}`, flavor: 'Smoke', batches: 1 },
+                  { id: `cheese-flavor-${Date.now()}`, flavor: 'Smoke', batches: 1, lotCode: '' },
                 ];
                 onCheeseFlavorsChange(nextRows);
                 onAmountChange(String(getCheesePlan(nextRows).totalBatches));
@@ -1572,7 +1593,7 @@ function PrintWeekSchedule({
                         <div>{task.inputAmount ? formatAmountLabel(task.inputAmount, task.inputUnit) : '-'}</div>
                         <div>{formatDuration(task.duration)}</div>
                         <div>{getAssignedEmployeeNames(task)}</div>
-                        <div>{task.notes || '-'}</div>
+                        <div>{[getCheeseFlavorLotLabel(task.cheeseFlavors), task.notes].filter(Boolean).join(' — ') || '-'}</div>
                       </div>
                     );
                   })}
@@ -1611,6 +1632,7 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
     : widthPercent;
 
   const timeString = getTaskTimeRange(scheduledTask);
+  const cheeseFlavorLotLabel = getCheeseFlavorLotLabel(scheduledTask.cheeseFlavors);
   const renderTaskContent = (height, isContinued = false) => (
     <>
       <div className="task-title task-title-with-employees" style={{ fontSize: widthPercent < 50 ? '0.75rem' : '0.875rem' }}>
@@ -1632,6 +1654,11 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
       </div>
       {!isContinued && (
         <>
+          {cheeseFlavorLotLabel && (
+            <div className="cheese-lot-badge" title={cheeseFlavorLotLabel}>
+              {cheeseFlavorLotLabel}
+            </div>
+          )}
           <div className="task-meta" style={{ marginBottom: '2px', fontSize: '0.7rem' }}>
             {scheduledTask.inputAmount ? `${formatAmountLabel(scheduledTask.inputAmount, scheduledTask.inputUnit)} - ` : ''}{timeString} ({formatDuration(scheduledTask.duration)})
           </div>

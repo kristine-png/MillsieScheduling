@@ -205,9 +205,13 @@
 
 .cheese-flavour-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 72px auto 28px;
+  grid-template-columns: minmax(90px, 1fr) minmax(90px, 1fr) 64px auto 28px;
   align-items: center;
   gap: 0.35rem;
+}
+
+.cheese-lot-input {
+  font-weight: 700;
 }
 
 .cheese-flavour-row select,
@@ -886,6 +890,21 @@
 
 .scheduled-task:hover .task-title {
   -webkit-line-clamp: unset !important;
+}
+
+.cheese-lot-badge {
+  margin: 0.18rem 0 0.28rem;
+  padding: 0.2rem 0.35rem;
+  overflow: hidden;
+  border: 1px solid rgba(113, 63, 18, 0.28);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--cheese-text);
+  font-size: 0.7rem;
+  font-weight: 900;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .task-ferment-prep {
