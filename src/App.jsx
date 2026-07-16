@@ -17,6 +17,7 @@ const LUNCH_START_ABSOLUTE_MINUTES = (LUNCH_START_HOUR * 60) + LUNCH_START_MINUT
 const LUNCH_END_ABSOLUTE_MINUTES = LUNCH_START_ABSOLUTE_MINUTES + LUNCH_DURATION_MINUTES;
 const SCHEDULE_START_HOUR = 7;
 const FERMENTATION_BOILING_START_OFFSET_MINUTES = 15;
+const CHEESE_PROCESSING_STAGGER_MINUTES = 20;
 
 const defaultFermentationAssignments = {
   'task-sanitation': ['emp-2'],
@@ -296,7 +297,7 @@ function getRunConfiguredDuration(runTemplate, amount, flavorCount = 1, assignme
     return getDipProcessingElapsedDuration(amount, flavorCount);
   }
 
-  if (runTemplate.id === 'run-fermentation') {
+  if (runTemplate.id === 'run-fermentation' || runTemplate.id === 'run-cheese-processing') {
     const layoutOffsets = getRunLayout(runTemplate, amount, flavorCount, cheeseFlavor, assignments, cheeseFlavors);
     const activeTaskIds = getActiveRunTaskIds(runTemplate, prepAheadTaskIds);
     if (activeTaskIds.length === 0) return 0;
@@ -562,6 +563,15 @@ function getSequentialLayout(runTemplate, amount, flavorCount = 1, cheeseFlavor 
 function getRunLayout(runTemplate, amount, flavorCount = 1, cheeseFlavor = 'Smoke', assignments = {}, cheeseFlavors = null) {
   if (runTemplate.id === 'run-dip-processing') {
     return Object.fromEntries(runTemplate.tasks.map(taskId => [taskId, 0]));
+  }
+
+  if (runTemplate.id === 'run-cheese-processing') {
+    return Object.fromEntries(
+      getRunTaskIds(runTemplate).map((taskId, index) => [
+        taskId,
+        index * CHEESE_PROCESSING_STAGGER_MINUTES,
+      ])
+    );
   }
 
   if (runTemplate.id !== 'run-fermentation') {
