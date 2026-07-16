@@ -205,17 +205,37 @@
 
 .cheese-flavour-row {
   display: grid;
-  grid-template-columns: minmax(90px, 1fr) minmax(90px, 1fr) 64px auto 28px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 28px;
   align-items: center;
   gap: 0.35rem;
 }
 
+.cheese-flavour-row select {
+  grid-column: 1;
+}
+
 .cheese-lot-input {
+  grid-column: 2;
   font-weight: 700;
+}
+
+.cheese-flavour-row input[type="number"] {
+  grid-column: 1;
+}
+
+.cheese-flavour-row > span {
+  grid-column: 2;
+  padding-left: 0.15rem;
+}
+
+.cheese-flavour-row .mini-remove-button {
+  grid-column: 3;
+  grid-row: 1 / span 2;
 }
 
 .cheese-flavour-row select,
 .cheese-flavour-row input {
+  min-width: 0;
   width: 100%;
   padding: 0.42rem 0.5rem;
   border: 1px solid var(--border-color);
