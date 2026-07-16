@@ -55,9 +55,20 @@ const DAILY_DUTY_BLOCKS = [
 ];
 const DEFAULT_AVAILABILITY = {
   isWorking: true,
-  start: '07:00',
-  end: '17:00',
+  start: '08:00',
+  end: '16:30',
   lunchMinutes: 30,
+};
+const EMPLOYEE_SHIFT_OVERRIDES = {
+  Khemika: {
+    start: '07:00',
+    end: '17:00',
+    daysOff: new Set(['Friday']),
+  },
+  Cecilia: {
+    start: '08:30',
+    end: '17:00',
+  },
 };
 const EMPLOYEE_COLOR_FALLBACKS = ['#EB4213', '#FF99DC', '#826DEE', '#D8F382', '#00C2A8', '#FFB000', '#3A86FF', '#F97316'];
 const TASK_GROUP_LAYOUT_ORDER = [
@@ -361,6 +372,15 @@ function formatHours(minutes) {
 
 function getAvailabilityKey(dayId, employeeId) {
   return `${dayId}-${employeeId}`;
+}
+
+function getDefaultEmployeeAvailability(employee, day) {
+  const shift = EMPLOYEE_SHIFT_OVERRIDES[employee?.name];
+  return {
+    ...DEFAULT_AVAILABILITY,
+    ...(shift ? { start: shift.start, end: shift.end } : {}),
+    isWorking: !shift?.daysOff?.has(day?.name),
+  };
 }
 
 function getTaskEmployeeIds(task) {
@@ -1158,7 +1178,7 @@ function EmployeeCapacityHeader({
         const expandedEmployee = employees.find(employee => getAvailabilityKey(day.id, employee.id) === expandedEmployeeKey);
         const expandedEmployeeIndex = employees.findIndex(employee => employee.id === expandedEmployee?.id);
         const expandedAvailability = expandedEmployee
-          ? availability[expandedEmployeeKey] || DEFAULT_AVAILABILITY
+          ? availability[expandedEmployeeKey] || getDefaultEmployeeAvailability(expandedEmployee, day)
           : null;
 
         return (
@@ -1172,7 +1192,7 @@ function EmployeeCapacityHeader({
             <div className="capacity-employee-list">
               {employees.map((employee, employeeIndex) => {
                 const key = getAvailabilityKey(day.id, employee.id);
-                const employeeAvailability = availability[key] || DEFAULT_AVAILABILITY;
+                const employeeAvailability = availability[key] || getDefaultEmployeeAvailability(employee, day);
                 const assignedMinutes = dayTasks.reduce((sum, task) => (
                   getTaskEmployeeIds(task).includes(employee.id) ? sum + task.duration : sum
                 ), 0);
@@ -1724,7 +1744,7 @@ export default function App() {
         employees.forEach(employee => {
           const key = getAvailabilityKey(day.id, employee.id);
           if (!next[key]) {
-            next[key] = { ...DEFAULT_AVAILABILITY };
+            next[key] = getDefaultEmployeeAvailability(employee, day);
             changed = true;
           }
         });
