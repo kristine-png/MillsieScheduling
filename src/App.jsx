@@ -574,6 +574,50 @@ function toggleEmployeeId(employeeIds = [], employeeId, maxSelections = Infinity
   return [...employeeIds, employeeId].slice(-maxSelections);
 }
 
+function EmployeeCheckboxPicker({
+  employees,
+  selectedEmployeeIds = [],
+  maxSelections = Infinity,
+  label = 'Assigned',
+  onChange,
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const selectedNames = selectedEmployeeIds
+    .map(employeeId => employees.find(employee => employee.id === employeeId)?.name)
+    .filter(Boolean);
+
+  return (
+    <div className={`employee-picker ${isOpen ? 'is-open' : ''}`}>
+      <button
+        type="button"
+        className="employee-picker-toggle"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen(current => !current)}
+      >
+        <span>{label}</span>
+        <span className="employee-picker-summary">
+          {selectedNames.length > 0 ? selectedNames.join(', ') : 'None'}
+        </span>
+        <ChevronDown size={15} className={`employee-picker-chevron ${isOpen ? 'is-open' : ''}`} />
+      </button>
+      {isOpen && (
+        <div className="mini-checkbox-list" aria-label={`${label} employees`}>
+          {employees.map(employee => (
+            <label key={employee.id} className="mini-checkbox-row">
+              <input
+                type="checkbox"
+                checked={selectedEmployeeIds.includes(employee.id)}
+                onChange={() => onChange(toggleEmployeeId(selectedEmployeeIds, employee.id, maxSelections))}
+              />
+              <span>{employee.name}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Draggable Sidebar Item (Full Run Template)
 function DraggableRunTemplate({
   runTemplate,
@@ -776,68 +820,19 @@ function DraggableRunTemplate({
             const task = taskTemplates.find(t => t.id === taskId);
             if (!task) return null;
             const selectedEmployeeIds = assignments[taskId] || [];
-            const overrideEmployeeId = selectedEmployeeIds[0] || '';
-            const defaultEmployee = employees.find(emp => emp.id === defaultEmployeeId);
-            const defaultOptionLabel = defaultEmployee
-              ? `Use main employee (${defaultEmployee.name})`
-              : 'Use main employee';
-            const maxSelections = task.maxPeopleAffectingDuration || 1;
+            const maxSelections = task.assignmentRoles?.length || task.maxPeopleAffectingDuration || 1;
 
             return (
               <div key={taskId} className="run-assignment-row">
                 <div className="run-assignment-heading">
                   <label className="run-assignment-name" htmlFor={`${runTemplate.id}-${taskId}-employee`}>{task.name}</label>
                 </div>
-                {task.assignmentRoles ? (
-                  <div className="role-assignment-list">
-                    {task.assignmentRoles.map((role, roleIndex) => (
-                      <label key={role} className="role-assignment-field">
-                        <span>{role}</span>
-                        <select
-                          value={selectedEmployeeIds[roleIndex] || ''}
-                          onChange={e => {
-                            const nextEmployeeIds = [...selectedEmployeeIds];
-                            nextEmployeeIds[roleIndex] = e.target.value;
-                            onAssignmentChange(taskId, nextEmployeeIds);
-                          }}
-                        >
-                          <option value="">Unassigned</option>
-                          {employees.map(emp => (
-                            <option key={emp.id} value={emp.id}>{emp.name}</option>
-                          ))}
-                        </select>
-                      </label>
-                    ))}
-                  </div>
-                ) : maxSelections > 1 ? (
-                  <div className="mini-checkbox-list" aria-label={`${task.name} people`}>
-                    {employees.map(emp => (
-                      <label key={emp.id} className="mini-checkbox-row">
-                        <input
-                          type="checkbox"
-                          checked={selectedEmployeeIds.includes(emp.id)}
-                          onChange={() => onAssignmentChange(taskId, toggleEmployeeId(selectedEmployeeIds, emp.id, maxSelections))}
-                        />
-                        <span>{emp.name}</span>
-                      </label>
-                    ))}
-                  </div>
-                ) : (
-                  <select
-                    id={`${runTemplate.id}-${taskId}-employee`}
-                    value={overrideEmployeeId}
-                    onChange={e => onAssignmentChange(taskId, e.target.value)}
-                  >
-                    {hasDefaultEmployeeField(runTemplate.id) ? (
-                      <option value="">{defaultOptionLabel}</option>
-                    ) : (
-                      <option value="">Unassigned</option>
-                    )}
-                    {employees.map(emp => (
-                      <option key={emp.id} value={emp.id}>{emp.name}</option>
-                    ))}
-                  </select>
-                )}
+                <EmployeeCheckboxPicker
+                  employees={employees}
+                  selectedEmployeeIds={selectedEmployeeIds}
+                  maxSelections={maxSelections}
+                  onChange={employeeIds => onAssignmentChange(taskId, employeeIds)}
+                />
               </div>
             );
           })}
@@ -985,52 +980,12 @@ function DraggableProcessTemplate({
             <small>{formatAmountLabel(changeovers, 'changeovers')}</small>
           </label>
         )}
-        {task.assignmentRoles ? (
-          <div className="role-assignment-list">
-            {task.assignmentRoles.map((role, roleIndex) => (
-              <label key={role} className="role-assignment-field">
-                <span>{role}</span>
-                <select
-                  value={selectedEmployeeIds[roleIndex] || ''}
-                  onChange={e => {
-                    const nextEmployeeIds = [...selectedEmployeeIds];
-                    nextEmployeeIds[roleIndex] = e.target.value;
-                    onEmployeeToggle(nextEmployeeIds, maxSelections);
-                  }}
-                >
-                  <option value="">Unassigned</option>
-                  {employees.map(emp => (
-                    <option key={emp.id} value={emp.id}>{emp.name}</option>
-                  ))}
-                </select>
-              </label>
-            ))}
-          </div>
-        ) : maxSelections > 1 ? (
-          <div className="mini-checkbox-list" aria-label={`${task.name} people`}>
-            {employees.map(emp => (
-              <label key={emp.id} className="mini-checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={selectedEmployeeIds.includes(emp.id)}
-                  onChange={() => onEmployeeToggle(emp.id, maxSelections)}
-                />
-                <span>{emp.name}</span>
-              </label>
-            ))}
-          </div>
-        ) : (
-          <select
-            value={selectedEmployeeIds[0] || ''}
-            onChange={e => onEmployeeToggle(e.target.value, maxSelections)}
-            aria-label={`${task.name} person`}
-          >
-            <option value="">Unassigned</option>
-            {employees.map(emp => (
-              <option key={emp.id} value={emp.id}>{emp.name}</option>
-            ))}
-          </select>
-        )}
+        <EmployeeCheckboxPicker
+          employees={employees}
+          selectedEmployeeIds={selectedEmployeeIds}
+          maxSelections={task.assignmentRoles?.length || maxSelections}
+          onChange={employeeIds => onEmployeeToggle(employeeIds, task.assignmentRoles?.length || maxSelections)}
+        />
       </div>
     </div>
   );

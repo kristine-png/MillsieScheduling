@@ -310,6 +310,54 @@
   background: white;
 }
 
+.employee-picker {
+  min-width: 0;
+}
+
+.employee-picker-toggle {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: white;
+  color: var(--text-main);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.employee-picker.is-open .employee-picker-toggle {
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.employee-picker .mini-checkbox-list {
+  border-top: 0;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+
+.employee-picker-summary {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-weight: 500;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.employee-picker-chevron {
+  transition: transform 0.18s ease;
+}
+
+.employee-picker-chevron.is-open {
+  transform: rotate(180deg);
+}
+
 .mini-checkbox-row {
   display: flex;
   align-items: center;
