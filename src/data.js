@@ -354,7 +354,7 @@ export const taskTemplates = [
   {
     id: 'task-packing-pallets',
     groupId: 'packaging-prep',
-    name: 'Packing Pallets',
+    name: 'Pallet Packing',
     colorVar: '--packaging',
     baseMinutes: 0,
     variableMinutesPerCycle: 60,
@@ -498,6 +498,7 @@ export const runTemplates = [
       'task-cheese-mixing',
       'task-dip-mixing',
       'task-sauce-mixing',
+      'task-mixing-support',
     ]
   },
   {
@@ -528,7 +529,6 @@ export const runTemplates = [
       'task-sticker-lids',
       'task-tape-boxes',
       'task-dry-mix-prep-set',
-      'task-packing-pallets',
     ]
   },
   {
@@ -541,6 +541,7 @@ export const runTemplates = [
     tasks: [
       'task-dip-filling',
       'task-sauce-filling',
+      'task-filling-floater',
     ]
   },
   {
@@ -559,15 +560,24 @@ export const runTemplates = [
     ]
   },
   {
-    id: 'run-support',
-    name: 'Support Blocks',
-    groupId: 'misc-work',
+    id: 'run-pallet-packing',
+    name: 'Pallet Packing',
+    groupId: 'packaging-prep',
     inputType: 'single',
-    inputUnit: 'blocks',
+    inputUnit: 'pallets',
     bucketsPerInputUnit: 1,
     tasks: [
-      'task-mixing-support',
-      'task-filling-floater',
+      'task-packing-pallets',
+    ]
+  },
+  {
+    id: 'run-inventory-reconciling',
+    name: 'Inventory Reconciling',
+    groupId: 'misc-work',
+    inputType: 'single',
+    inputUnit: 'counts',
+    bucketsPerInputUnit: 1,
+    tasks: [
       'task-inventory-reconciling',
     ]
   },

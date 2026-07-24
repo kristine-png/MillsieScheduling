@@ -159,7 +159,8 @@ function createInitialProcessSetups() {
     'run-dip-processing',
     'run-veg-prep',
     'run-packaging-prep',
-    'run-support',
+    'run-pallet-packing',
+    'run-inventory-reconciling',
   ]);
   const processFolderTasks = runTemplates
     .filter(runTemplate => processFolderRunIds.has(runTemplate.id))
@@ -1346,6 +1347,7 @@ function ProcessFolder({
   taskTemplates,
   employees,
   processSetups,
+  isStandalone = false,
   folderAmount,
   isExpanded,
   onToggle,
@@ -1357,6 +1359,37 @@ function ProcessFolder({
   onFlavorRowsChange,
   onEmployeeToggle,
 }) {
+  const processCards = runTemplate.tasks.map(taskId => {
+    const task = taskTemplates.find(t => t.id === taskId);
+    if (!task) return null;
+    const setup = processSetups[taskId] || { amount: '1', employeeIds: [] };
+
+    return (
+      <DraggableProcessTemplate
+        key={taskId}
+        task={task}
+        employees={employees}
+        amount={setup.amount}
+        flavorCount={setup.flavorCount || '1'}
+        unitMode={setup.unitMode || 'racks'}
+        cheeseFlavor={setup.cheeseFlavor || 'Smoke'}
+        flavorRows={setup.flavorRows}
+        employeeIds={setup.employeeIds || []}
+        prepAhead={setup.prepAhead || false}
+        onAmountChange={amount => onAmountChange(taskId, amount)}
+        onFlavorCountChange={flavorCount => onFlavorCountChange(taskId, flavorCount)}
+        onUnitModeChange={unitMode => onUnitModeChange(taskId, unitMode)}
+        onCheeseFlavorChange={cheeseFlavor => onCheeseFlavorChange(taskId, cheeseFlavor)}
+        onFlavorRowsChange={flavorRows => onFlavorRowsChange(taskId, flavorRows)}
+        onEmployeeToggle={(employeeId, maxSelections) => onEmployeeToggle(taskId, employeeId, maxSelections)}
+      />
+    );
+  });
+
+  if (isStandalone) {
+    return <div className="run-setup-card">{processCards}</div>;
+  }
+
   return (
     <div className="run-setup-card">
       <button
@@ -1387,32 +1420,7 @@ function ProcessFolder({
               />
             </label>
           )}
-          {runTemplate.tasks.map(taskId => {
-            const task = taskTemplates.find(t => t.id === taskId);
-            if (!task) return null;
-            const setup = processSetups[taskId] || { amount: '1', employeeIds: [] };
-
-            return (
-              <DraggableProcessTemplate
-                key={taskId}
-                task={task}
-                employees={employees}
-                amount={setup.amount}
-                flavorCount={setup.flavorCount || '1'}
-                unitMode={setup.unitMode || 'racks'}
-                cheeseFlavor={setup.cheeseFlavor || 'Smoke'}
-                flavorRows={setup.flavorRows}
-                employeeIds={setup.employeeIds || []}
-                prepAhead={setup.prepAhead || false}
-                onAmountChange={amount => onAmountChange(taskId, amount)}
-                onFlavorCountChange={flavorCount => onFlavorCountChange(taskId, flavorCount)}
-                onUnitModeChange={unitMode => onUnitModeChange(taskId, unitMode)}
-                onCheeseFlavorChange={cheeseFlavor => onCheeseFlavorChange(taskId, cheeseFlavor)}
-                onFlavorRowsChange={flavorRows => onFlavorRowsChange(taskId, flavorRows)}
-                onEmployeeToggle={(employeeId, maxSelections) => onEmployeeToggle(taskId, employeeId, maxSelections)}
-              />
-            );
-          })}
+          {processCards}
         </div>
       )}
     </div>
@@ -2859,7 +2867,8 @@ export default function App() {
                     || runTemplate.id === 'run-dip-processing'
                     || runTemplate.id === 'run-veg-prep'
                     || runTemplate.id === 'run-packaging-prep'
-                    || runTemplate.id === 'run-support'
+                    || runTemplate.id === 'run-pallet-packing'
+                    || runTemplate.id === 'run-inventory-reconciling'
                   ) {
                     return (
                       <ProcessFolder
@@ -2868,6 +2877,10 @@ export default function App() {
                         taskTemplates={taskTemplates}
                         employees={employees}
                         processSetups={processSetups}
+                        isStandalone={
+                          runTemplate.id === 'run-pallet-packing'
+                          || runTemplate.id === 'run-inventory-reconciling'
+                        }
                         folderAmount={runSetup.amount || '1'}
                         isExpanded={expandedRunId === runTemplate.id}
                         onToggle={() => setExpandedRunId(prev => prev === runTemplate.id ? null : runTemplate.id)}
