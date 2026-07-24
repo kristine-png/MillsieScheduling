@@ -1436,7 +1436,14 @@
 @media print {
   @page {
     size: landscape;
-    margin: 0.35in;
+    margin: 0.35in 0.35in 0.5in;
+
+    @bottom-center {
+      content: "Page " counter(page) " of " counter(pages);
+      color: #4b5563;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 8pt;
+    }
   }
 
   html,

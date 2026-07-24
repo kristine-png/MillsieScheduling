@@ -1802,17 +1802,17 @@ function PrintWeekSchedule({
   };
 
   const getRunName = (task) => {
-    if (task.isAutomaticDaily) return 'Daily duties';
+    if (task.isAutomaticDaily) return task.name;
     const run = activeRuns.find(item => item.id === task.runId);
     return run?.name || 'Single process';
   };
 
   const getRunSortDetails = (task, runStartByKey = new Map()) => {
     const run = activeRuns.find(item => item.id === task.runId);
-    const runId = task.isAutomaticDaily ? `daily-${task.dateStr}` : (task.runId || task.id);
+    const runId = task.runId || task.id;
     return {
       groupRank: getTaskGroupLayoutRank(task.groupId),
-      runName: task.isAutomaticDaily ? 'Daily duties' : (run?.name || 'Single process'),
+      runName: task.isAutomaticDaily ? task.name : (run?.name || 'Single process'),
       runId,
       runStart: runStartByKey.get(runId) ?? ((task.startHour * 60) + (task.startMinute || 0)),
       start: (task.startHour * 60) + (task.startMinute || 0),
@@ -1822,7 +1822,7 @@ function PrintWeekSchedule({
   const getSortedTasksForDay = (dayId) => {
     const dayTasks = scheduledTasks.filter(task => task.dateStr === dayId);
     const runStartByKey = dayTasks.reduce((map, task) => {
-      const runId = task.isAutomaticDaily ? `daily-${task.dateStr}` : (task.runId || task.id);
+      const runId = task.runId || task.id;
       const start = (task.startHour * 60) + (task.startMinute || 0);
       const existingStart = map.get(runId);
       if (existingStart === undefined || start < existingStart) {
@@ -1835,8 +1835,8 @@ function PrintWeekSchedule({
       const detailsA = getRunSortDetails(a, runStartByKey);
       const detailsB = getRunSortDetails(b, runStartByKey);
 
-      if (detailsA.groupRank !== detailsB.groupRank) return detailsA.groupRank - detailsB.groupRank;
       if (detailsA.runStart !== detailsB.runStart) return detailsA.runStart - detailsB.runStart;
+      if (detailsA.groupRank !== detailsB.groupRank) return detailsA.groupRank - detailsB.groupRank;
       if (detailsA.runName !== detailsB.runName) return detailsA.runName.localeCompare(detailsB.runName);
       if (detailsA.runId !== detailsB.runId) return detailsA.runId.localeCompare(detailsB.runId);
       return detailsA.start - detailsB.start;
