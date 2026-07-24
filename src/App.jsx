@@ -213,6 +213,37 @@ function normalizeDailyDutyTask(task) {
   };
 }
 
+function normalizeStoredScheduleTasks(tasks) {
+  const dailyNormalized = tasks.map(normalizeDailyDutyTask);
+  const sanitationByRunId = new Map(
+    dailyNormalized
+      .filter(task => task.templateId === 'task-sanitation' && !task.isContinuation)
+      .map(task => [task.runId, task])
+  );
+
+  return dailyNormalized.map(task => {
+    if (task.templateId !== 'task-stickering' || task.isContinuation) return task;
+    const sanitationTask = sanitationByRunId.get(task.runId);
+    if (!sanitationTask || sanitationTask.dateStr !== task.dateStr) return task;
+    const expectedStart = addMinutesToStart(
+      sanitationTask.startHour,
+      sanitationTask.startMinute || 0,
+      sanitationTask.duration
+    );
+    if (
+      task.startHour === expectedStart.startHour
+      && task.startMinute === expectedStart.startMinute
+    ) {
+      return task;
+    }
+    return {
+      ...task,
+      startHour: expectedStart.startHour,
+      startMinute: expectedStart.startMinute,
+    };
+  });
+}
+
 function getDurationWorkerCount(template, employeeIds = []) {
   if (!template?.maxPeopleAffectingDuration) return 1;
   const assignedCount = Math.max(1, employeeIds.filter(Boolean).length || 1);
@@ -756,7 +787,7 @@ function getRunLayout(runTemplate, amount, flavorCount = 1, cheeseFlavor = 'Smok
 
   return {
     'task-sanitation': 0,
-    'task-stickering': 0,
+    'task-stickering': durationByTaskId['task-sanitation'] || 0,
     'task-boiling': FERMENTATION_BOILING_START_OFFSET_MINUTES,
     'task-cleanup': cleanupStartOffset,
   };
@@ -1973,7 +2004,7 @@ export default function App() {
       if (Array.isArray(saved.employees)) setEmployees(saved.employees);
       if (Array.isArray(saved.activeRuns)) setActiveRuns(saved.activeRuns);
       if (Array.isArray(saved.scheduledTasks)) {
-        setScheduledTasks(saved.scheduledTasks.map(normalizeDailyDutyTask));
+        setScheduledTasks(normalizeStoredScheduleTasks(saved.scheduledTasks));
       }
       if (saved.runSetups) setRunSetups(saved.runSetups);
       if (saved.processSetups) setProcessSetups(saved.processSetups);
