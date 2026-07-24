@@ -809,7 +809,10 @@ function toggleEmployeeId(employeeIds = [], employeeId, maxSelections = Infinity
   if (employeeIds.includes(employeeId)) {
     return employeeIds.filter(id => id !== employeeId);
   }
-  return [...employeeIds, employeeId].slice(-maxSelections);
+  const nextEmployeeIds = [...employeeIds, employeeId];
+  return Number.isFinite(maxSelections)
+    ? nextEmployeeIds.slice(-maxSelections)
+    : nextEmployeeIds;
 }
 
 function EmployeeCheckboxPicker({
@@ -1058,8 +1061,6 @@ function DraggableRunTemplate({
             const task = taskTemplates.find(t => t.id === taskId);
             if (!task) return null;
             const selectedEmployeeIds = assignments[taskId] || [];
-            const maxSelections = task.assignmentRoles?.length || task.maxPeopleAffectingDuration || 1;
-
             return (
               <div key={taskId} className="run-assignment-row">
                 <div className="run-assignment-heading">
@@ -1068,7 +1069,7 @@ function DraggableRunTemplate({
                 <EmployeeCheckboxPicker
                   employees={employees}
                   selectedEmployeeIds={selectedEmployeeIds}
-                  maxSelections={maxSelections}
+                  maxSelections={Infinity}
                   onChange={employeeIds => onAssignmentChange(taskId, employeeIds)}
                 />
               </div>
@@ -1110,7 +1111,6 @@ function DraggableProcessTemplate({
     ? (selectedUnitMode === 'cases' ? 'cases' : 'pallets')
     : (isCheeseConvertible && selectedUnitMode === 'batches' ? 'batches' : task.unitName);
   const selectedEmployeeIds = employeeIds || [];
-  const maxSelections = task.maxPeopleAffectingDuration || 1;
   const duration = getProcessTaskDuration(task, parsedAmount, selectedEmployeeIds, parsedFlavorCount, selectedUnitMode, selectedCheeseFlavor);
   const displayedDuration = MIXING_TASK_IDS.has(task.id) ? duration + 90 : duration;
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -1223,8 +1223,8 @@ function DraggableProcessTemplate({
         <EmployeeCheckboxPicker
           employees={employees}
           selectedEmployeeIds={selectedEmployeeIds}
-          maxSelections={task.assignmentRoles?.length || maxSelections}
-          onChange={employeeIds => onEmployeeToggle(employeeIds, task.assignmentRoles?.length || maxSelections)}
+          maxSelections={Infinity}
+          onChange={employeeIds => onEmployeeToggle(employeeIds, Infinity)}
         />
       </div>
     </div>
@@ -2273,7 +2273,7 @@ export default function App() {
     }));
   };
 
-  const handleProcessEmployeeToggle = (taskId, employeeSelection, maxSelections = 1) => {
+  const handleProcessEmployeeToggle = (taskId, employeeSelection, maxSelections = Infinity) => {
     setProcessSetups(prev => {
       const setup = prev[taskId] || { amount: '1', employeeIds: [] };
       const employeeIds = Array.isArray(employeeSelection)
@@ -2984,10 +2984,7 @@ export default function App() {
                   <div className="checkbox-list">
                     {employees.map(emp => {
                       const skill = emp.skills[assigningTask.templateId] || 'untrained';
-                      const assignmentTemplate = taskTemplates.find(t => t.id === assigningTask.templateId);
-                      const maxSelections = assignmentTemplate?.maxPeopleAffectingDuration || Infinity;
                       const isChecked = selectedEmployees.includes(emp.id);
-                      const isDisabled = !isChecked && selectedEmployees.length >= maxSelections;
                       let skillLabel = '';
                       if (skill === 'expert') skillLabel = ' (Expert)';
                       if (skill === 'beginner') skillLabel = ' (Beginner)';
@@ -2998,10 +2995,9 @@ export default function App() {
                           <input
                             type="checkbox"
                             checked={isChecked}
-                            disabled={isDisabled}
                             onChange={e => {
                               setSelectedEmployees(prev => e.target.checked
-                                ? [...prev, emp.id].slice(-maxSelections)
+                                ? [...prev, emp.id]
                                 : prev.filter(id => id !== emp.id)
                               );
                             }}
