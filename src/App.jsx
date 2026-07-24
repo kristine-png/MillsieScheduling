@@ -1,10 +1,11 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { DndContext, useDraggable, useDroppable, pointerWithin, useSensors, useSensor, PointerSensor, DragOverlay } from '@dnd-kit/core';
 import { initialEmployees, taskTemplates, runTemplates, hoursOfDay } from './data';
 import { Clock, GripVertical, AlertCircle, Users, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Printer, Trash2, StickyNote } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { format, addWeeks, subWeeks, startOfWeek, addDays, getWeek } from 'date-fns';
 import TeamManagement from './TeamManagement';
+import { isSupabaseConfigured, supabase } from './supabase';
 import './App.css';
 
 const HOUR_ROW_HEIGHT = 80;
@@ -28,16 +29,25 @@ const defaultFermentationAssignments = {
 
 const DIP_PROCESSING_LINE_TASK_IDS = new Set([
   'task-dip-filling',
-  'task-dip-sealing',
-  'task-dip-sleeves-boxes',
 ]);
-const DIP_PROCESSING_CHANGEOVER_MINUTES = 15;
+const DIP_PROCESSING_CHANGEOVER_MINUTES = 10;
 const DIP_PROCESSING_SETUP_CLEANUP_MINUTES = 40;
-const MIXING_CHANGEOVER_MINUTES = 18;
+const MIXING_CHANGEOVER_MINUTES = 10;
 const MIXING_CHANGEOVER_TASK_IDS = new Set([
   'task-cheese-mixing',
   'task-dip-mixing',
 ]);
+const MIXING_TASK_IDS = new Set([
+  'task-cheese-mixing',
+  'task-dip-mixing',
+  'task-sauce-mixing',
+]);
+const CONTINUOUS_ACROSS_LUNCH_TASK_IDS = new Set([
+  'task-dip-filling',
+  'task-sauce-filling',
+]);
+const DAY_END_ABSOLUTE_MINUTES = 17 * 60;
+const SCHEDULER_WORKSPACE_ID = 'millsie-production';
 const DAILY_DUTY_BLOCKS = [
   {
     idPrefix: 'opening-duties',
@@ -134,8 +144,10 @@ function createInitialRunSetups() {
 function createInitialProcessSetups() {
   const processFolderRunIds = new Set([
     'run-dip-mixing',
+    'run-dip-processing',
     'run-veg-prep',
     'run-packaging-prep',
+    'run-support',
   ]);
   const processFolderTasks = runTemplates
     .filter(runTemplate => processFolderRunIds.has(runTemplate.id))
@@ -401,7 +413,57 @@ function getTaskDefaultNote(task, sourceAmountLabel = '') {
   if (task.id === 'task-boiling') {
     return 'Full boiling and mixing flow; bucket washing can overlap after first 15 minutes.';
   }
-  return '';
+  if (task.id === 'task-mixing-room-setup') {
+    return 'Sanitize the machine, lay out cardboard, and gather equipment.';
+  }
+  return task.timingNote || '';
+}
+
+function createMixingCompanionTasks(mixingTask) {
+  if (!MIXING_TASK_IDS.has(mixingTask.templateId)) return [mixingTask];
+
+  const setupTemplate = taskTemplates.find(task => task.id === 'task-mixing-room-setup');
+  const cleanupTemplate = taskTemplates.find(task => task.id === 'task-mixing-cleanup');
+  const mixingStart = addMinutesToStart(mixingTask.startHour, mixingTask.startMinute || 0, setupTemplate.baseMinutes);
+  const cleanupStart = addMinutesToStart(mixingStart.startHour, mixingStart.startMinute, mixingTask.duration);
+
+  return [
+    {
+      ...mixingTask,
+      id: uuidv4(),
+      templateId: setupTemplate.id,
+      groupId: setupTemplate.groupId,
+      name: setupTemplate.name,
+      startHour: mixingTask.startHour,
+      startMinute: mixingTask.startMinute || 0,
+      duration: setupTemplate.baseMinutes,
+      inputAmount: 1,
+      inputUnit: setupTemplate.unitName,
+      buckets: 1,
+      notes: getTaskDefaultNote(setupTemplate),
+      isAutomaticCompanion: true,
+    },
+    {
+      ...mixingTask,
+      startHour: mixingStart.startHour,
+      startMinute: mixingStart.startMinute,
+    },
+    {
+      ...mixingTask,
+      id: uuidv4(),
+      templateId: cleanupTemplate.id,
+      groupId: cleanupTemplate.groupId,
+      name: cleanupTemplate.name,
+      startHour: cleanupStart.startHour,
+      startMinute: cleanupStart.startMinute,
+      duration: cleanupTemplate.baseMinutes,
+      inputAmount: 1,
+      inputUnit: cleanupTemplate.unitName,
+      buckets: 1,
+      notes: getTaskDefaultNote(cleanupTemplate),
+      isAutomaticCompanion: true,
+    },
+  ];
 }
 
 function mergeNotes(defaultNote, customNote = '') {
@@ -471,6 +533,12 @@ function getTaskWorkSegments(task) {
   if (duration <= 0) return [];
 
   const endWithoutLunch = start + duration;
+  if (CONTINUOUS_ACROSS_LUNCH_TASK_IDS.has(task.templateId)) {
+    return [{
+      start,
+      duration: addWorkMinutesToAbsoluteStart(start, duration) - start,
+    }];
+  }
   if (start >= LUNCH_END_ABSOLUTE_MINUTES || endWithoutLunch <= LUNCH_START_ABSOLUTE_MINUTES) {
     return [{ start, duration }];
   }
@@ -549,6 +617,78 @@ function getRunDisplayName(runTemplate, inputAmount, inputUnit, fallbackName = '
 
 function addMinutesToStart(startHour, startMinute, minutesToAdd) {
   return addWorkMinutesToStart(startHour, startMinute, minutesToAdd);
+}
+
+function getNextWorkingDayId(dateStr) {
+  let next = addDays(new Date(`${dateStr}T12:00:00`), 1);
+  while ([0, 6].includes(next.getDay())) {
+    next = addDays(next, 1);
+  }
+  return format(next, 'yyyy-MM-dd');
+}
+
+function getWorkMinutesUntilDayEnd(startHour, startMinute) {
+  const start = moveStartOutOfLunch(getAbsoluteMinutes(startHour, startMinute));
+  if (start >= DAY_END_ABSOLUTE_MINUTES) return 0;
+  const lunchMinutes = start < LUNCH_START_ABSOLUTE_MINUTES ? LUNCH_DURATION_MINUTES : 0;
+  return Math.max(0, DAY_END_ABSOLUTE_MINUTES - start - lunchMinutes);
+}
+
+function splitTaskAcrossWorkingDays(task) {
+  const chunks = [];
+  let remainingDuration = Math.max(0, task.duration || 0);
+  let dateStr = task.dateStr;
+  let startHour = task.startHour;
+  let startMinute = task.startMinute || 0;
+  const originalDuration = remainingDuration;
+  const originalAmount = Number(task.inputAmount) || 0;
+  let chunkIndex = 0;
+
+  while (remainingDuration > 0) {
+    let availableMinutes = getWorkMinutesUntilDayEnd(startHour, startMinute);
+    if (availableMinutes <= 0) {
+      dateStr = getNextWorkingDayId(dateStr);
+      startHour = SCHEDULE_START_HOUR;
+      startMinute = 0;
+      availableMinutes = getWorkMinutesUntilDayEnd(startHour, startMinute);
+    }
+
+    const duration = Math.min(remainingDuration, availableMinutes);
+    const isContinuation = chunkIndex > 0;
+    const inputAmount = originalAmount > 0 && originalDuration > 0
+      ? Math.round((originalAmount * duration / originalDuration) * 100) / 100
+      : task.inputAmount;
+
+    chunks.push({
+      ...task,
+      id: chunkIndex === 0 ? task.id : uuidv4(),
+      dateStr,
+      startHour,
+      startMinute,
+      duration,
+      inputAmount,
+      buckets: inputAmount || task.buckets,
+      isContinuation,
+      continuationOfId: chunkIndex === 0 ? task.id : (task.continuationOfId || task.id),
+      notes: isContinuation
+        ? mergeNotes(task.notes || '', 'Carryover from previous day; drag this block to reschedule it.')
+        : task.notes,
+    });
+
+    remainingDuration -= duration;
+    if (remainingDuration > 0) {
+      dateStr = getNextWorkingDayId(dateStr);
+      startHour = SCHEDULE_START_HOUR;
+      startMinute = 0;
+      chunkIndex += 1;
+    }
+  }
+
+  return chunks;
+}
+
+function expandTasksAcrossWorkingDays(tasks) {
+  return tasks.flatMap(splitTaskAcrossWorkingDays);
 }
 
 function getSequentialLayout(runTemplate, amount, flavorCount = 1, cheeseFlavor = 'Smoke', assignments = {}, cheeseFlavors = null) {
@@ -904,6 +1044,7 @@ function DraggableProcessTemplate({
   const selectedEmployeeIds = employeeIds || [];
   const maxSelections = task.maxPeopleAffectingDuration || 1;
   const duration = getProcessTaskDuration(task, parsedAmount, selectedEmployeeIds, parsedFlavorCount, selectedUnitMode, selectedCheeseFlavor);
+  const displayedDuration = MIXING_TASK_IDS.has(task.id) ? duration + 90 : duration;
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `task-template-${task.id}`,
     disabled: prepAhead,
@@ -938,7 +1079,8 @@ function DraggableProcessTemplate({
             <Clock size={12} />
             {formatAmountLabel(parsedAmount, displayUnitName)}
             {isTapeCasesTask && selectedUnitMode !== 'cases' ? ` -> ${formatAmountLabel(effectiveAmount, 'cases')}` : ''}
-            {isCheeseConvertible && selectedUnitMode === 'batches' ? ` -> ${formatAmountLabel(effectiveAmount, task.unitName)}` : ''}, {formatDuration(duration)}
+            {isCheeseConvertible && selectedUnitMode === 'batches' ? ` -> ${formatAmountLabel(effectiveAmount, task.unitName)}` : ''}, {formatDuration(displayedDuration)}
+            {MIXING_TASK_IDS.has(task.id) ? ' incl. set-up & cleanup' : ''}
           </div>
         </div>
       </div>
@@ -1174,11 +1316,13 @@ function EmployeeCapacityHeader({
   scheduledTasks,
   availability,
   onAvailabilityChange,
+  scrollRef,
+  onScroll,
 }) {
   const [expandedEmployeeKey, setExpandedEmployeeKey] = useState(null);
 
   return (
-    <div className="capacity-strip">
+    <div className="capacity-strip" ref={scrollRef} onScroll={onScroll}>
       <div className="capacity-time-cell">People</div>
       {weekDays.map(day => {
         const dayTasks = scheduledTasks.filter(task => task.dateStr === day.id);
@@ -1590,7 +1734,7 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
   const renderTaskContent = (height, isContinued = false) => (
     <>
       <div className="task-title task-title-with-employees" style={{ fontSize: widthPercent < 50 ? '0.75rem' : '0.875rem' }}>
-        <span>{isContinued ? `${scheduledTask.name} continued` : scheduledTask.name}</span>
+        <span>{(isContinued || scheduledTask.isContinuation) ? `${scheduledTask.name} continued` : scheduledTask.name}</span>
         {!isContinued && assignedEmployees.length > 0 && (
           <span className="title-employee-dots" aria-label={assignedEmployees.map(emp => emp.name).join(', ')}>
             {assignedEmployees.map(emp => {
@@ -1691,6 +1835,13 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
 }
 
 export default function App() {
+  const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(isSupabaseConfigured);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authMessage, setAuthMessage] = useState('');
+  const [schedulerReady, setSchedulerReady] = useState(!isSupabaseConfigured);
+  const [syncStatus, setSyncStatus] = useState(isSupabaseConfigured ? 'Connecting…' : 'Local only');
+  const [syncError, setSyncError] = useState('');
   const [employees, setEmployees] = useState(initialEmployees);
   const [currentView, setCurrentView] = useState('schedule');
   const [activeRuns, setActiveRuns] = useState([]);
@@ -1728,12 +1879,140 @@ export default function App() {
   const [miscWorkName, setMiscWorkName] = useState('Misc Work');
   const [miscWorkDuration, setMiscWorkDuration] = useState('30');
   const [expandedRunId, setExpandedRunId] = useState(null);
+  const capacityScrollRef = useRef(null);
+  const scheduleScrollRef = useRef(null);
+  const saveTimerRef = useRef(null);
 
   const [activeDragItem, setActiveDragItem] = useState(null);
   const [dragTimeHint, setDragTimeHint] = useState(null);
   const visibleWeekTaskCount = scheduledTasks.filter(task => weekDayIds.has(task.dateStr) && !task.isAutomaticDaily).length;
 
+  const syncHorizontalScroll = (source, targetRef) => {
+    if (targetRef.current && targetRef.current.scrollLeft !== source.currentTarget.scrollLeft) {
+      targetRef.current.scrollLeft = source.currentTarget.scrollLeft;
+    }
+  };
+
   useEffect(() => {
+    if (!supabase) return undefined;
+
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (error) setAuthMessage(error.message);
+      setSession(data.session);
+      setAuthLoading(false);
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setAuthLoading(false);
+      if (!nextSession) {
+        setSchedulerReady(false);
+        setSyncStatus('Signed out');
+      }
+    });
+
+    return () => authListener.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!supabase || !session?.user?.id) return;
+    let cancelled = false;
+
+    const loadSchedulerState = async () => {
+      setSchedulerReady(false);
+      setSyncError('');
+      setSyncStatus('Loading schedule…');
+
+      const { data, error } = await supabase
+        .from('scheduler_state')
+        .select('state, updated_at')
+        .eq('workspace_id', SCHEDULER_WORKSPACE_ID)
+        .maybeSingle();
+
+      if (cancelled) return;
+      if (error) {
+        setSyncError(error.message);
+        setSyncStatus('Database setup needed');
+        return;
+      }
+
+      const saved = data?.state || {};
+      if (Array.isArray(saved.employees)) setEmployees(saved.employees);
+      if (Array.isArray(saved.activeRuns)) setActiveRuns(saved.activeRuns);
+      if (Array.isArray(saved.scheduledTasks)) setScheduledTasks(saved.scheduledTasks);
+      if (saved.runSetups) setRunSetups(saved.runSetups);
+      if (saved.processSetups) setProcessSetups(saved.processSetups);
+      if (saved.employeeAvailability) setEmployeeAvailability(saved.employeeAvailability);
+      setSchedulerReady(true);
+      setSyncStatus(data?.updated_at ? 'Schedule synced' : 'Ready to save');
+    };
+
+    loadSchedulerState();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user?.id]);
+
+  useEffect(() => {
+    if (!supabase || !session?.user?.id || !schedulerReady) return undefined;
+
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
+      setSyncStatus('Saving…');
+      const state = {
+        employees,
+        activeRuns,
+        scheduledTasks,
+        runSetups,
+        processSetups,
+        employeeAvailability,
+      };
+      const { error } = await supabase
+        .from('scheduler_state')
+        .upsert({
+          workspace_id: SCHEDULER_WORKSPACE_ID,
+          state,
+          updated_at: new Date().toISOString(),
+          updated_by: session.user.id,
+        }, { onConflict: 'workspace_id' });
+
+      if (error) {
+        setSyncError(error.message);
+        setSyncStatus('Save failed');
+      } else {
+        setSyncError('');
+        setSyncStatus('Saved');
+      }
+    }, 700);
+
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [
+    activeRuns,
+    employeeAvailability,
+    employees,
+    processSetups,
+    runSetups,
+    scheduledTasks,
+    schedulerReady,
+    session?.user?.id,
+  ]);
+
+  const handleMagicLinkSignIn = async (event) => {
+    event.preventDefault();
+    if (!supabase || !authEmail.trim()) return;
+    setAuthMessage('Sending sign-in link…');
+    const { error } = await supabase.auth.signInWithOtp({
+      email: authEmail.trim(),
+      options: { emailRedirectTo: window.location.origin },
+    });
+    setAuthMessage(error ? error.message : 'Check your email for the secure sign-in link.');
+  };
+
+  useEffect(() => {
+    // Keep the generated daily-duty blocks aligned with the visible week.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setScheduledTasks(prev => {
       const existingIds = new Set(prev.map(task => task.id));
       const missingDailyTasks = weekDays.flatMap(day => (
@@ -1747,6 +2026,8 @@ export default function App() {
   }, [weekDays]);
 
   useEffect(() => {
+    // Seed availability when a new week or employee appears.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setEmployeeAvailability(prev => {
       let changed = false;
       const next = { ...prev };
@@ -2017,7 +2298,7 @@ export default function App() {
           };
         }).filter(Boolean);
 
-        setScheduledTasks(prev => [...prev, ...newTasks]);
+        setScheduledTasks(prev => [...prev, ...expandTasksAcrossWorkingDays(newTasks)]);
         setActiveRuns(prev => [...prev, {
           id: runId,
           templateId: runTemplate.id,
@@ -2051,7 +2332,7 @@ export default function App() {
           : '';
         const defaultNote = getTaskDefaultNote(template, sourceAmountLabel);
 
-        setScheduledTasks(prev => [...prev, {
+        const processTask = {
           id: uuidv4(),
           runId,
           templateId: template.id,
@@ -2070,7 +2351,9 @@ export default function App() {
           sourceAmount: inputAmount,
           sourceUnitMode: unitMode,
           cheeseFlavor,
-        }]);
+        };
+        const processTasks = createMixingCompanionTasks(processTask);
+        setScheduledTasks(prev => [...prev, ...expandTasksAcrossWorkingDays(processTasks)]);
         setActiveRuns(prev => [...prev, {
           id: runId,
           templateId: null,
@@ -2090,7 +2373,7 @@ export default function App() {
         const duration = Math.max(5, Number(active.data.current.duration) || 30);
         const name = active.data.current.name || 'Misc Work';
 
-        setScheduledTasks(prev => [...prev, {
+        setScheduledTasks(prev => [...prev, ...splitTaskAcrossWorkingDays({
           id: uuidv4(),
           runId,
           templateId: template?.id || 'task-misc-work',
@@ -2106,7 +2389,7 @@ export default function App() {
           buckets: 1,
           notes: '',
           isCustomWork: true,
-        }]);
+        })]);
         setActiveRuns(prev => [...prev, {
           id: runId,
           templateId: null,
@@ -2121,11 +2404,15 @@ export default function App() {
       
       if (active.data.current?.type === 'scheduled') {
         const draggedTask = active.data.current.scheduledTask;
-        setScheduledTasks(prev => prev.map(t => 
-          t.id === draggedTask.id 
-            ? { ...t, dateStr, startHour, startMinute } 
-            : t
-        ));
+        setScheduledTasks(prev => prev.flatMap(t => {
+          if (t.id !== draggedTask.id) return [t];
+          return splitTaskAcrossWorkingDays({
+            ...t,
+            dateStr,
+            startHour,
+            startMinute,
+          });
+        }));
       }
     }
   };
@@ -2247,6 +2534,64 @@ export default function App() {
     }
   };
 
+  if (!isSupabaseConfigured) {
+    return (
+      <main className="auth-screen">
+        <section className="auth-card">
+          <h1>Supabase configuration needed</h1>
+          <p>Add the project URL and publishable key to the Vercel project environment variables.</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (authLoading) {
+    return (
+      <main className="auth-screen">
+        <section className="auth-card">
+          <h1>Millsie Scheduler</h1>
+          <p>Connecting securely…</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!session) {
+    return (
+      <main className="auth-screen">
+        <form className="auth-card" onSubmit={handleMagicLinkSignIn}>
+          <h1>Millsie Scheduler</h1>
+          <p>Enter your work email and we’ll send you a secure sign-in link.</p>
+          <label>
+            <span>Email address</span>
+            <input
+              type="email"
+              value={authEmail}
+              onChange={event => setAuthEmail(event.target.value)}
+              placeholder="you@millsie.com"
+              required
+            />
+          </label>
+          <button type="submit" className="btn btn-primary">Email me a sign-in link</button>
+          {authMessage && <div className="auth-message">{authMessage}</div>}
+        </form>
+      </main>
+    );
+  }
+
+  if (!schedulerReady) {
+    return (
+      <main className="auth-screen">
+        <section className="auth-card">
+          <h1>Millsie Scheduler</h1>
+          <p>{syncError ? 'The database migration still needs to be installed.' : 'Loading the shared schedule…'}</p>
+          {syncError && <div className="auth-error">{syncError}</div>}
+          <button type="button" className="btn btn-secondary" onClick={() => supabase.auth.signOut()}>Sign out</button>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <DndContext
       sensors={sensors}
@@ -2292,8 +2637,10 @@ export default function App() {
                   const runSetup = runSetups[runTemplate.id] || { amount: '1', assignments: {} };
                   if (
                     runTemplate.id === 'run-dip-mixing'
+                    || runTemplate.id === 'run-dip-processing'
                     || runTemplate.id === 'run-veg-prep'
                     || runTemplate.id === 'run-packaging-prep'
+                    || runTemplate.id === 'run-support'
                   ) {
                     return (
                       <ProcessFolder
@@ -2387,10 +2734,11 @@ export default function App() {
 
         {currentView === 'schedule' ? (
           <div className="schedule-main">
-            <div className="schedule-header">
+          <div className="schedule-header">
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}>
               <CalendarDays size={20} color="var(--primary)" />
               Week {currentWeekNumber} ({weekStartStr} - {weekEndStr})
+              <span className={`sync-status ${syncError ? 'has-error' : ''}`}>{syncStatus}</span>
             </div>
             
             <div className="week-navigation">
@@ -2416,6 +2764,9 @@ export default function App() {
                 <Trash2 size={16} />
                 Clear Week
               </button>
+              <button className="btn btn-secondary" onClick={() => supabase.auth.signOut()}>
+                Sign out
+              </button>
             </div>
           </div>
 
@@ -2425,9 +2776,15 @@ export default function App() {
             scheduledTasks={scheduledTasks}
             availability={employeeAvailability}
             onAvailabilityChange={handleAvailabilityChange}
+            scrollRef={capacityScrollRef}
+            onScroll={event => syncHorizontalScroll(event, scheduleScrollRef)}
           />
 
-          <div className="schedule-grid-container">
+          <div
+            className="schedule-grid-container"
+            ref={scheduleScrollRef}
+            onScroll={event => syncHorizontalScroll(event, capacityScrollRef)}
+          >
             <div className="schedule-grid">
               {/* Header Row (Row 1) */}
               <div className="grid-header-cell" style={{ borderTopLeftRadius: 'var(--radius-lg)' }}>Time</div>
