@@ -49,6 +49,7 @@ const CONTINUOUS_ACROSS_LUNCH_TASK_IDS = new Set([
 const DAY_END_ABSOLUTE_MINUTES = 17 * 60;
 const SCHEDULER_WORKSPACE_ID = 'millsie-production';
 const SHARED_SCHEDULER_EMAIL = 'admin@millsie.com';
+const REMOVED_CHEESE_CAPACITY_NOTE = 'Daily capacity: 28 unskilled, 38 average, or 52 skilled batches, plus 30 minutes set-up and 60 minutes cleanup.';
 const DAILY_DUTY_BLOCKS = [
   {
     idPrefix: 'opening-duties',
@@ -221,7 +222,7 @@ function normalizeStoredScheduleTasks(tasks) {
       .map(task => [task.runId, task])
   );
 
-  return dailyNormalized.map(task => {
+  const positionedTasks = dailyNormalized.map(task => {
     if (task.templateId !== 'task-stickering' || task.isContinuation) return task;
     const sanitationTask = sanitationByRunId.get(task.runId);
     if (!sanitationTask || sanitationTask.dateStr !== task.dateStr) return task;
@@ -240,6 +241,16 @@ function normalizeStoredScheduleTasks(tasks) {
       ...task,
       startHour: expectedStart.startHour,
       startMinute: expectedStart.startMinute,
+    };
+  });
+
+  return positionedTasks.map(task => {
+    if (task.templateId !== 'task-cheese-mixing' || !task.notes?.includes(REMOVED_CHEESE_CAPACITY_NOTE)) {
+      return task;
+    }
+    return {
+      ...task,
+      notes: task.notes.replace(REMOVED_CHEESE_CAPACITY_NOTE, '').trim(),
     };
   });
 }

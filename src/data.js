@@ -291,7 +291,6 @@ export const taskTemplates = [
       expert: 52,
       unassigned: 38,
     },
-    timingNote: 'Daily capacity: 28 unskilled, 38 average, or 52 skilled batches, plus 30 minutes set-up and 60 minutes cleanup.',
   },
   {
     id: 'task-cheese-moulds',
