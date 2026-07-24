@@ -119,6 +119,23 @@ const TAPE_CASES_PER_PALLET_BY_UNIT_MODE = {
   dipPallets: 56 * CASES_PER_TAPE_BUNDLE,
 };
 const DEFAULT_CHEESE_FLAVORS = [{ id: 'cheese-flavor-1', flavor: 'Smoke', batches: '1', lotCode: '' }];
+const FLAVOR_PLANNER_TASK_IDS = new Set([
+  'task-cheese-mixing',
+  'task-dip-mixing',
+  'task-sauce-mixing',
+  'task-dip-filling',
+  'task-sauce-filling',
+]);
+
+function createDefaultProcessFlavorRows(taskId) {
+  const defaultFlavor = taskId === 'task-cheese-mixing' ? 'Smoke' : '';
+  return [{
+    id: `${taskId}-flavor-1`,
+    flavor: defaultFlavor,
+    amount: '1',
+    lotCode: '',
+  }];
+}
 const ASSUMPTION_FLAG_TASK_IDS = new Set([
   TAPE_CASES_TASK_ID,
   'task-cheese-dipping',
@@ -162,6 +179,9 @@ function createInitialProcessSetups() {
       cheeseFlavor: 'Smoke',
       employeeIds: [],
       prepAhead: false,
+      flavorRows: FLAVOR_PLANNER_TASK_IDS.has(taskId)
+        ? createDefaultProcessFlavorRows(taskId)
+        : undefined,
     }])
   );
 }
@@ -308,6 +328,26 @@ function getCheeseFlavorLotLabel(cheeseFlavors) {
   return cheeseFlavors
     .map(row => `${row.flavor || 'Cheese'}${row.lotCode ? ` · Lot ${row.lotCode}` : ' · Lot —'}`)
     .join(' / ');
+}
+
+function getProcessFlavorPlan(flavorRows, fallbackAmount = 1, taskId = '') {
+  const rows = Array.isArray(flavorRows) && flavorRows.length > 0
+    ? flavorRows
+    : createDefaultProcessFlavorRows(taskId).map(row => ({
+        ...row,
+        amount: String(Math.max(1, Number(fallbackAmount) || 1)),
+      }));
+  const normalizedRows = rows.map((row, index) => ({
+    id: row.id || `${taskId}-flavor-${index + 1}`,
+    flavor: String(row.flavor || '').trim(),
+    amount: Math.max(1, Number(row.amount) || Number(fallbackAmount) || 1),
+    lotCode: String(row.lotCode || '').trim(),
+  }));
+  return {
+    rows: normalizedRows,
+    totalAmount: normalizedRows.reduce((sum, row) => sum + row.amount, 0),
+    flavorCount: normalizedRows.length,
+  };
 }
 
 function getCheeseProcessAmount(task, amount, unitMode = 'racks', flavor = 'Smoke') {
@@ -1089,16 +1129,24 @@ function DraggableProcessTemplate({
   flavorCount,
   unitMode,
   cheeseFlavor,
+  flavorRows,
   employeeIds,
   prepAhead,
   onAmountChange,
   onFlavorCountChange,
   onUnitModeChange,
   onCheeseFlavorChange,
+  onFlavorRowsChange,
   onEmployeeToggle,
 }) {
-  const parsedAmount = Math.max(1, Number(amount) || 1);
-  const parsedFlavorCount = Math.max(1, Number(flavorCount) || 1);
+  const usesFlavorPlanner = FLAVOR_PLANNER_TASK_IDS.has(task.id);
+  const flavorPlan = getProcessFlavorPlan(flavorRows, amount, task.id);
+  const parsedAmount = usesFlavorPlanner
+    ? flavorPlan.totalAmount
+    : Math.max(1, Number(amount) || 1);
+  const parsedFlavorCount = usesFlavorPlanner
+    ? flavorPlan.flavorCount
+    : Math.max(1, Number(flavorCount) || 1);
   const changeovers = Math.max(0, parsedFlavorCount - 1);
   const isTapeCasesTask = task.id === TAPE_CASES_TASK_ID;
   const selectedUnitMode = unitMode || (isTapeCasesTask ? 'cases' : 'racks');
@@ -1125,6 +1173,7 @@ function DraggableProcessTemplate({
       cheeseFlavor: selectedCheeseFlavor,
       effectiveAmount,
       employeeIds: selectedEmployeeIds,
+      flavorRows: usesFlavorPlanner ? flavorPlan.rows : undefined,
       prepAhead,
     },
   });
@@ -1153,15 +1202,83 @@ function DraggableProcessTemplate({
         </div>
       </div>
       <div className="process-setup-controls">
-        <label className="compact-field process-amount-field">
-          <span>{getDisplayUnit(parsedAmount, displayUnitName)}</span>
-          <input
-            type="number"
-            min="1"
-            value={amount}
-            onChange={e => onAmountChange(e.target.value)}
-          />
-        </label>
+        {usesFlavorPlanner ? (
+          <div className="cheese-flavour-list process-flavour-list">
+            <div className="cheese-flavour-summary">
+              <span>{formatAmountLabel(flavorPlan.totalAmount, task.unitName)}</span>
+              <small>{formatAmountLabel(flavorPlan.flavorCount, 'flavours')}</small>
+            </div>
+            {flavorPlan.rows.map(row => (
+              <div key={row.id} className="cheese-flavour-row process-flavour-row">
+                <input
+                  type="text"
+                  value={row.flavor}
+                  placeholder="Flavour"
+                  aria-label="Flavour"
+                  onChange={event => onFlavorRowsChange(flavorPlan.rows.map(item => (
+                    item.id === row.id ? { ...item, flavor: event.target.value } : item
+                  )))}
+                />
+                <input
+                  className="cheese-lot-input"
+                  type="text"
+                  value={row.lotCode}
+                  placeholder="Lot code"
+                  aria-label={`${row.flavor || 'Flavour'} lot code`}
+                  onChange={event => onFlavorRowsChange(flavorPlan.rows.map(item => (
+                    item.id === row.id ? { ...item, lotCode: event.target.value } : item
+                  )))}
+                />
+                <input
+                  type="number"
+                  min="1"
+                  value={row.amount}
+                  aria-label={`${row.flavor || 'Flavour'} ${task.unitName}`}
+                  onChange={event => onFlavorRowsChange(flavorPlan.rows.map(item => (
+                    item.id === row.id ? { ...item, amount: event.target.value } : item
+                  )))}
+                />
+                <span>{task.unitName}</span>
+                <button
+                  type="button"
+                  className="mini-remove-button"
+                  disabled={flavorPlan.rows.length === 1}
+                  onClick={() => onFlavorRowsChange(flavorPlan.rows.filter(item => item.id !== row.id))}
+                >
+                  x
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              className="btn btn-secondary add-flavour-button"
+              onClick={() => onFlavorRowsChange([
+                ...flavorPlan.rows,
+                {
+                  id: `${task.id}-flavor-${Math.max(
+                    0,
+                    ...flavorPlan.rows.map(item => Number(item.id.split('-').pop()) || 0)
+                  ) + 1}`,
+                  flavor: '',
+                  amount: 1,
+                  lotCode: '',
+                },
+              ])}
+            >
+              Add flavour
+            </button>
+          </div>
+        ) : (
+          <label className="compact-field process-amount-field">
+            <span>{getDisplayUnit(parsedAmount, displayUnitName)}</span>
+            <input
+              type="number"
+              min="1"
+              value={amount}
+              onChange={e => onAmountChange(e.target.value)}
+            />
+          </label>
+        )}
         {isCheeseConvertible && (
           <div className="cheese-conversion-controls">
             <label className="compact-field">
@@ -1208,7 +1325,7 @@ function DraggableProcessTemplate({
             )}
           </div>
         )}
-        {MIXING_CHANGEOVER_TASK_IDS.has(task.id) && (
+        {MIXING_CHANGEOVER_TASK_IDS.has(task.id) && !usesFlavorPlanner && (
           <label className="compact-field process-amount-field">
             <span>flavours</span>
             <input
@@ -1244,6 +1361,7 @@ function ProcessFolder({
   onFlavorCountChange,
   onUnitModeChange,
   onCheeseFlavorChange,
+  onFlavorRowsChange,
   onEmployeeToggle,
 }) {
   return (
@@ -1290,12 +1408,14 @@ function ProcessFolder({
                 flavorCount={setup.flavorCount || '1'}
                 unitMode={setup.unitMode || 'racks'}
                 cheeseFlavor={setup.cheeseFlavor || 'Smoke'}
+                flavorRows={setup.flavorRows}
                 employeeIds={setup.employeeIds || []}
                 prepAhead={setup.prepAhead || false}
                 onAmountChange={amount => onAmountChange(taskId, amount)}
                 onFlavorCountChange={flavorCount => onFlavorCountChange(taskId, flavorCount)}
                 onUnitModeChange={unitMode => onUnitModeChange(taskId, unitMode)}
                 onCheeseFlavorChange={cheeseFlavor => onCheeseFlavorChange(taskId, cheeseFlavor)}
+                onFlavorRowsChange={flavorRows => onFlavorRowsChange(taskId, flavorRows)}
                 onEmployeeToggle={(employeeId, maxSelections) => onEmployeeToggle(taskId, employeeId, maxSelections)}
               />
             );
@@ -1808,7 +1928,9 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
     : widthPercent;
 
   const timeString = getTaskTimeRange(scheduledTask);
-  const cheeseFlavorLotLabel = getCheeseFlavorLotLabel(scheduledTask.cheeseFlavors);
+  const cheeseFlavorLotLabel = getCheeseFlavorLotLabel(
+    scheduledTask.cheeseFlavors || scheduledTask.processFlavors
+  );
   const renderTaskContent = (height, isContinued = false) => (
     <>
       <div className="task-title task-title-with-employees" style={{ fontSize: widthPercent < 50 ? '0.75rem' : '0.875rem' }}>
@@ -2273,6 +2395,19 @@ export default function App() {
     }));
   };
 
+  const handleProcessFlavorRowsChange = (taskId, flavorRows) => {
+    const flavorPlan = getProcessFlavorPlan(flavorRows, 1, taskId);
+    setProcessSetups(prev => ({
+      ...prev,
+      [taskId]: {
+        ...(prev[taskId] || { employeeIds: [] }),
+        flavorRows,
+        amount: String(flavorPlan.totalAmount),
+        flavorCount: String(flavorPlan.flavorCount),
+      },
+    }));
+  };
+
   const handleProcessEmployeeToggle = (taskId, employeeSelection, maxSelections = Infinity) => {
     setProcessSetups(prev => {
       const setup = prev[taskId] || { amount: '1', employeeIds: [] };
@@ -2414,6 +2549,7 @@ export default function App() {
         const effectiveAmount = Math.max(1, Number(active.data.current.effectiveAmount) || inputAmount);
         const inputUnit = template.unitName;
         const employeeIds = active.data.current.employeeIds || [];
+        const processFlavors = active.data.current.flavorRows || undefined;
         const duration = getProcessTaskDuration(template, inputAmount, employeeIds, flavorCount, unitMode, cheeseFlavor);
         const sourceAmountLabel = CHEESE_BATCH_CONVERTIBLE_TASK_IDS.has(template.id) && unitMode === 'batches'
           ? `${formatAmountLabel(inputAmount, 'batches')} ${cheeseFlavor}`
@@ -2441,6 +2577,7 @@ export default function App() {
           sourceAmount: inputAmount,
           sourceUnitMode: unitMode,
           cheeseFlavor,
+          processFlavors,
         };
         const processTasks = createMixingCompanionTasks(processTask);
         setScheduledTasks(prev => [...prev, ...expandTasksAcrossWorkingDays(processTasks)]);
@@ -2454,6 +2591,7 @@ export default function App() {
           name: getRunDisplayName(null, effectiveAmount, inputUnit, template.name),
           groupId: template.groupId,
           buckets: effectiveAmount,
+          processFlavors,
         }]);
       }
 
@@ -2747,6 +2885,7 @@ export default function App() {
                         onFlavorCountChange={handleProcessFlavorCountChange}
                         onUnitModeChange={handleProcessUnitModeChange}
                         onCheeseFlavorChange={handleProcessCheeseFlavorChange}
+                        onFlavorRowsChange={handleProcessFlavorRowsChange}
                         onEmployeeToggle={handleProcessEmployeeToggle}
                       />
                     );
