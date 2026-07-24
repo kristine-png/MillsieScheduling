@@ -1838,6 +1838,7 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(isSupabaseConfigured);
   const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
   const [authMessage, setAuthMessage] = useState('');
   const [schedulerReady, setSchedulerReady] = useState(!isSupabaseConfigured);
   const [syncStatus, setSyncStatus] = useState(isSupabaseConfigured ? 'Connecting…' : 'Local only');
@@ -1999,15 +2000,15 @@ export default function App() {
     session?.user?.id,
   ]);
 
-  const handleMagicLinkSignIn = async (event) => {
+  const handlePasswordSignIn = async (event) => {
     event.preventDefault();
-    if (!supabase || !authEmail.trim()) return;
-    setAuthMessage('Sending sign-in link…');
-    const { error } = await supabase.auth.signInWithOtp({
+    if (!supabase || !authEmail.trim() || !authPassword) return;
+    setAuthMessage('Signing in…');
+    const { error } = await supabase.auth.signInWithPassword({
       email: authEmail.trim(),
-      options: { emailRedirectTo: window.location.origin },
+      password: authPassword,
     });
-    setAuthMessage(error ? error.message : 'Check your email for the secure sign-in link.');
+    setAuthMessage(error ? 'Email or password is incorrect.' : '');
   };
 
   useEffect(() => {
@@ -2559,9 +2560,9 @@ export default function App() {
   if (!session) {
     return (
       <main className="auth-screen">
-        <form className="auth-card" onSubmit={handleMagicLinkSignIn}>
+        <form className="auth-card" onSubmit={handlePasswordSignIn}>
           <h1>Millsie Scheduler</h1>
-          <p>Enter your work email and we’ll send you a secure sign-in link.</p>
+          <p>Sign in with the account created for you by the Millsie administrator.</p>
           <label>
             <span>Email address</span>
             <input
@@ -2569,10 +2570,21 @@ export default function App() {
               value={authEmail}
               onChange={event => setAuthEmail(event.target.value)}
               placeholder="you@millsie.com"
+              autoComplete="username"
               required
             />
           </label>
-          <button type="submit" className="btn btn-primary">Email me a sign-in link</button>
+          <label>
+            <span>Password</span>
+            <input
+              type="password"
+              value={authPassword}
+              onChange={event => setAuthPassword(event.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </label>
+          <button type="submit" className="btn btn-primary">Sign in</button>
           {authMessage && <div className="auth-message">{authMessage}</div>}
         </form>
       </main>
