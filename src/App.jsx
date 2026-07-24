@@ -1915,9 +1915,6 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
 
   const leftPercent = layout ? layout.left : 0;
   const widthPercent = layout ? layout.width : 100;
-  const displayWidthPercent = scheduledTask.isAutomaticDaily && widthPercent < 50
-    ? Math.min(100 - leftPercent, widthPercent * 2)
-    : widthPercent;
 
   const renderTaskContent = (isContinued = false) => (
     <>
@@ -1972,7 +1969,7 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
         height: `${elapsedHeight}px`, 
         top: `${top + 1}px`,
         left: `calc(${leftPercent}% + 1px)`,
-        width: `calc(${displayWidthPercent}% - 2px)`,
+        width: `calc(${widthPercent}% - 2px)`,
         opacity: isDragging ? 0.5 : 1,
         touchAction: 'none',
         position: 'absolute',
