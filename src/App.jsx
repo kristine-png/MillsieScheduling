@@ -48,7 +48,7 @@ const CONTINUOUS_ACROSS_LUNCH_TASK_IDS = new Set([
 ]);
 const DAY_END_ABSOLUTE_MINUTES = 17 * 60;
 const SCHEDULER_WORKSPACE_ID = 'millsie-production';
-const SHARED_SCHEDULER_EMAIL = 'scheduler@millsiefinefoods.com';
+const SHARED_SCHEDULER_EMAIL = 'admin@millsie.com';
 const DAILY_DUTY_BLOCKS = [
   {
     idPrefix: 'opening-duties',
