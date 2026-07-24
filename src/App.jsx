@@ -48,6 +48,7 @@ const CONTINUOUS_ACROSS_LUNCH_TASK_IDS = new Set([
 ]);
 const DAY_END_ABSOLUTE_MINUTES = 17 * 60;
 const SCHEDULER_WORKSPACE_ID = 'millsie-production';
+const SHARED_SCHEDULER_EMAIL = 'scheduler@millsiefinefoods.com';
 const DAILY_DUTY_BLOCKS = [
   {
     idPrefix: 'opening-duties',
@@ -1837,7 +1838,6 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
 export default function App() {
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(isSupabaseConfigured);
-  const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authMessage, setAuthMessage] = useState('');
   const [schedulerReady, setSchedulerReady] = useState(!isSupabaseConfigured);
@@ -2002,10 +2002,10 @@ export default function App() {
 
   const handlePasswordSignIn = async (event) => {
     event.preventDefault();
-    if (!supabase || !authEmail.trim() || !authPassword) return;
+    if (!supabase || !authPassword) return;
     setAuthMessage('Signing in…');
     const { error } = await supabase.auth.signInWithPassword({
-      email: authEmail.trim(),
+      email: SHARED_SCHEDULER_EMAIL,
       password: authPassword,
     });
     setAuthMessage(error ? 'Email or password is incorrect.' : '');
@@ -2562,18 +2562,7 @@ export default function App() {
       <main className="auth-screen">
         <form className="auth-card" onSubmit={handlePasswordSignIn}>
           <h1>Millsie Scheduler</h1>
-          <p>Sign in with the account created for you by the Millsie administrator.</p>
-          <label>
-            <span>Email address</span>
-            <input
-              type="email"
-              value={authEmail}
-              onChange={event => setAuthEmail(event.target.value)}
-              placeholder="you@millsie.com"
-              autoComplete="username"
-              required
-            />
-          </label>
+          <p>Enter the shared production scheduling password.</p>
           <label>
             <span>Password</span>
             <input
