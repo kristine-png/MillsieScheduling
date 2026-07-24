@@ -2049,6 +2049,7 @@ export default function App() {
   const [schedulerReady, setSchedulerReady] = useState(!isSupabaseConfigured);
   const [syncStatus, setSyncStatus] = useState(isSupabaseConfigured ? 'Connecting…' : 'Local only');
   const [syncError, setSyncError] = useState('');
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [employees, setEmployees] = useState(initialEmployees);
   const [currentView, setCurrentView] = useState('schedule');
   const [activeRuns, setActiveRuns] = useState([]);
@@ -2130,13 +2131,34 @@ export default function App() {
       setSyncError('');
       setSyncStatus('Loading schedule…');
 
-      const { data, error } = await supabase
-        .from('scheduler_state')
-        .select('state, updated_at')
-        .eq('workspace_id', SCHEDULER_WORKSPACE_ID)
-        .maybeSingle();
+      let timeoutId;
+      let result;
+      try {
+        result = await Promise.race([
+          supabase
+            .from('scheduler_state')
+            .select('state, updated_at')
+            .eq('workspace_id', SCHEDULER_WORKSPACE_ID)
+            .maybeSingle(),
+          new Promise((_, reject) => {
+            timeoutId = setTimeout(
+              () => reject(new Error('The schedule request timed out. Check your connection and try again.')),
+              12000
+            );
+          }),
+        ]);
+      } catch (error) {
+        if (!cancelled) {
+          setSyncError(error.message);
+          setSyncStatus('Load failed');
+        }
+        return;
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       if (cancelled) return;
+      const { data, error } = result;
       if (error) {
         setSyncError(error.message);
         setSyncStatus('Database setup needed');
@@ -2160,7 +2182,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [session?.user?.id]);
+  }, [loadAttempt, session?.user?.id]);
 
   useEffect(() => {
     if (!supabase || !session?.user?.id || !schedulerReady) return undefined;
@@ -2814,6 +2836,11 @@ export default function App() {
           <h1>Millsie Scheduler</h1>
           <p>{syncError ? 'The shared schedule database needs attention.' : 'Loading the shared schedule…'}</p>
           {syncError && <div className="auth-error">{syncError}</div>}
+          {syncError && (
+            <button type="button" className="btn btn-primary" onClick={() => setLoadAttempt(attempt => attempt + 1)}>
+              Try again
+            </button>
+          )}
           <button type="button" className="btn btn-secondary" onClick={() => supabase.auth.signOut()}>Sign out</button>
         </section>
       </main>
