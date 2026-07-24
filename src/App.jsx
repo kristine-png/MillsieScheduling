@@ -1650,7 +1650,17 @@ function layoutDayTasks(tasks) {
     packEvents();
   }
 
-  return results;
+  const mixingLayoutByRunId = new Map(
+    results
+      .filter(result => MIXING_TASK_IDS.has(result.task.templateId))
+      .map(result => [result.task.runId, result.layout])
+  );
+
+  return results.map(result => {
+    if (result.task.templateId !== 'task-mixing-cleanup') return result;
+    const mixingLayout = mixingLayoutByRunId.get(result.task.runId);
+    return mixingLayout ? { ...result, layout: mixingLayout } : result;
+  });
 }
 
 function PrintWeekSchedule({
