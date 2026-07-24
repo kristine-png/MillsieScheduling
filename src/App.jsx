@@ -1945,7 +1945,7 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
       </div>
       {!isContinued && (
         <>
-          {scheduledTask.inputAmount && !scheduledTask.isAutomaticDaily && (
+          {scheduledTask.inputAmount && !scheduledTask.isAutomaticDaily && !scheduledTask.isAutomaticCompanion && (
             <div className="task-meta task-amount-meta">
               {formatAmountLabel(scheduledTask.inputAmount, scheduledTask.inputUnit)}
             </div>
