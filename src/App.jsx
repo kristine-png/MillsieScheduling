@@ -1840,7 +1840,7 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
               {cheeseFlavorLotLabel}
             </div>
           )}
-          {scheduledTask.inputAmount && (
+          {scheduledTask.inputAmount && !scheduledTask.isAutomaticDaily && (
             <div className="task-meta task-amount-meta">
               {formatAmountLabel(scheduledTask.inputAmount, scheduledTask.inputUnit)}
             </div>
