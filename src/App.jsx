@@ -2585,7 +2585,7 @@ export default function App() {
       <main className="auth-screen">
         <section className="auth-card">
           <h1>Millsie Scheduler</h1>
-          <p>{syncError ? 'The database migration still needs to be installed.' : 'Loading the shared schedule…'}</p>
+          <p>{syncError ? 'The shared schedule database needs attention.' : 'Loading the shared schedule…'}</p>
           {syncError && <div className="auth-error">{syncError}</div>}
           <button type="button" className="btn btn-secondary" onClick={() => supabase.auth.signOut()}>Sign out</button>
         </section>
