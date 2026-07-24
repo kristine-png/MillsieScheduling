@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { DndContext, useDraggable, useDroppable, pointerWithin, useSensors, useSensor, PointerSensor, DragOverlay } from '@dnd-kit/core';
 import { initialEmployees, taskTemplates, runTemplates, hoursOfDay } from './data';
-import { Clock, GripVertical, AlertCircle, Users, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Printer, Trash2, StickyNote } from 'lucide-react';
+import { Clock, GripVertical, AlertCircle, Users, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Printer, Trash2 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { format, addWeeks, subWeeks, startOfWeek, addDays, getWeek } from 'date-fns';
 import TeamManagement from './TeamManagement';
@@ -136,13 +136,6 @@ function createDefaultProcessFlavorRows(taskId) {
     lotCode: '',
   }];
 }
-const ASSUMPTION_FLAG_TASK_IDS = new Set([
-  TAPE_CASES_TASK_ID,
-  'task-cheese-dipping',
-  'task-cheese-sealing',
-  'task-cheese-packing',
-]);
-
 function createInitialRunSetups() {
   return Object.fromEntries(
     runTemplates.map(runTemplate => [
@@ -1914,7 +1907,6 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
     .map(employeeId => employees.find(e => e.id === employeeId))
     .filter(Boolean);
   const hasUntrainedEmployee = assignedEmployees.some(emp => (emp.skills[scheduledTask.templateId] || 'untrained') === 'untrained');
-  const hasTimingAssumption = ASSUMPTION_FLAG_TASK_IDS.has(scheduledTask.templateId);
   const segments = getTaskWorkSegments(scheduledTask);
   const firstSegmentStart = segments[0]?.start || moveStartOutOfLunch(getAbsoluteMinutes(scheduledTask.startHour, scheduledTask.startMinute || 0));
   const lastSegment = segments[segments.length - 1] || { start: firstSegmentStart, duration: scheduledTask.duration };
@@ -1927,11 +1919,7 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
     ? Math.min(100 - leftPercent, widthPercent * 2)
     : widthPercent;
 
-  const timeString = getTaskTimeRange(scheduledTask);
-  const cheeseFlavorLotLabel = getCheeseFlavorLotLabel(
-    scheduledTask.cheeseFlavors || scheduledTask.processFlavors
-  );
-  const renderTaskContent = (height, isContinued = false) => (
+  const renderTaskContent = (isContinued = false) => (
     <>
       <div className="task-title task-title-with-employees" style={{ fontSize: widthPercent < 50 ? '0.75rem' : '0.875rem' }}>
         <span>{(isContinued || scheduledTask.isContinuation) ? `${scheduledTask.name} continued` : scheduledTask.name}</span>
@@ -1957,20 +1945,11 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
       </div>
       {!isContinued && (
         <>
-          {cheeseFlavorLotLabel && (
-            <div className="cheese-lot-badge" title={cheeseFlavorLotLabel}>
-              {cheeseFlavorLotLabel}
-            </div>
-          )}
           {scheduledTask.inputAmount && !scheduledTask.isAutomaticDaily && (
             <div className="task-meta task-amount-meta">
               {formatAmountLabel(scheduledTask.inputAmount, scheduledTask.inputUnit)}
             </div>
           )}
-          <div className="task-meta task-time-on-hover">
-            <Clock size={12} />
-            {timeString} ({formatDuration(scheduledTask.duration)})
-          </div>
           {assignedEmployees.length > 0 ? (
             <div className="task-meta">
               <Users size={12} />
@@ -1978,18 +1957,6 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
               {hasUntrainedEmployee && <AlertCircle size={12} color="var(--danger)" style={{ flexShrink: 0 }} />}
             </div>
           ) : null}
-          {scheduledTask.notes && height >= 58 && (
-            <div className="task-meta task-notes-preview">
-              <StickyNote size={12} />
-              <span>{scheduledTask.notes}</span>
-            </div>
-          )}
-          {hasTimingAssumption && height >= 78 && (
-            <div className="task-meta timing-assumption-preview">
-              <AlertCircle size={12} />
-              <span>Timing assumption</span>
-            </div>
-          )}
         </>
       )}
     </>
@@ -2033,7 +2000,7 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
               padding: segmentHeight < 40 ? '2px 6px' : '0.5rem',
             }}
           >
-            {renderTaskContent(segmentHeight, !showFullContent)}
+            {renderTaskContent(!showFullContent)}
           </div>
         );
       })}
@@ -3108,7 +3075,14 @@ export default function App() {
           <div className="modal-overlay">
             <div className="modal-content">
               <h3>Edit Schedule</h3>
-              <p style={{ marginBottom: '1rem', color: 'var(--text-muted)' }}>{assigningTask.name} ({formatDuration(assigningTask.duration)})</p>
+              <p style={{ marginBottom: '0.35rem', color: 'var(--text-muted)' }}>
+                {assigningTask.name} · {getTaskTimeRange(assigningTask)} · {formatDuration(assigningTask.duration)}
+              </p>
+              {getCheeseFlavorLotLabel(assigningTask.cheeseFlavors || assigningTask.processFlavors) && (
+                <p style={{ marginBottom: '1rem', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                  {getCheeseFlavorLotLabel(assigningTask.cheeseFlavors || assigningTask.processFlavors)}
+                </p>
+              )}
               <form onSubmit={handleAssignSubmit}>
                 {assigningTask.isCustomWork ? (
                   <>

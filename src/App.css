@@ -1009,12 +1009,6 @@
 .scheduled-task:hover {
   box-shadow: var(--shadow-md);
   z-index: 50 !important;
-  min-height: max-content !important;
-  min-width: max(100%, 150px) !important;
-}
-
-.scheduled-task:hover .task-title {
-  -webkit-line-clamp: unset !important;
 }
 
 .cheese-lot-badge {
@@ -1126,16 +1120,6 @@
 .task-amount-meta {
   margin-bottom: 2px;
   font-size: 0.7rem;
-}
-
-.task-time-on-hover {
-  display: none;
-  margin-bottom: 2px;
-  font-size: 0.7rem;
-}
-
-.scheduled-task:hover .task-time-on-hover {
-  display: flex;
 }
 
 .title-employee-dot {
