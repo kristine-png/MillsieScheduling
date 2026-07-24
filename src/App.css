@@ -1097,6 +1097,7 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .title-employee-dots {
@@ -1104,6 +1105,33 @@
   align-items: center;
   gap: 0.16rem;
   flex-shrink: 0;
+}
+
+.task-unassigned-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--danger);
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.task-amount-meta {
+  margin-bottom: 2px;
+  font-size: 0.7rem;
+}
+
+.task-time-on-hover {
+  display: none;
+  margin-bottom: 2px;
+  font-size: 0.7rem;
+}
+
+.scheduled-task:hover .task-time-on-hover {
+  display: flex;
 }
 
 .title-employee-dot {

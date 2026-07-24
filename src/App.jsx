@@ -1761,7 +1761,7 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
     <>
       <div className="task-title task-title-with-employees" style={{ fontSize: widthPercent < 50 ? '0.75rem' : '0.875rem' }}>
         <span>{(isContinued || scheduledTask.isContinuation) ? `${scheduledTask.name} continued` : scheduledTask.name}</span>
-        {!isContinued && assignedEmployees.length > 0 && (
+        {!isContinued && assignedEmployees.length > 0 ? (
           <span className="title-employee-dots" aria-label={assignedEmployees.map(emp => emp.name).join(', ')}>
             {assignedEmployees.map(emp => {
               const employeeIndex = employees.findIndex(item => item.id === emp.id);
@@ -1774,7 +1774,12 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
               );
             })}
           </span>
-        )}
+        ) : !isContinued ? (
+          <span className="task-unassigned-inline">
+            <AlertCircle size={12} />
+            Unassigned
+          </span>
+        ) : null}
       </div>
       {!isContinued && (
         <>
@@ -1783,8 +1788,14 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
               {cheeseFlavorLotLabel}
             </div>
           )}
-          <div className="task-meta" style={{ marginBottom: '2px', fontSize: '0.7rem' }}>
-            {scheduledTask.inputAmount ? `${formatAmountLabel(scheduledTask.inputAmount, scheduledTask.inputUnit)} - ` : ''}{timeString} ({formatDuration(scheduledTask.duration)})
+          {scheduledTask.inputAmount && (
+            <div className="task-meta task-amount-meta">
+              {formatAmountLabel(scheduledTask.inputAmount, scheduledTask.inputUnit)}
+            </div>
+          )}
+          <div className="task-meta task-time-on-hover">
+            <Clock size={12} />
+            {timeString} ({formatDuration(scheduledTask.duration)})
           </div>
           {assignedEmployees.length > 0 ? (
             <div className="task-meta">
@@ -1792,11 +1803,7 @@ function ScheduledTaskBlock({ scheduledTask, employees, onClick, layout }) {
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{assignedEmployees.map(emp => emp.name).join(', ')}</span>
               {hasUntrainedEmployee && <AlertCircle size={12} color="var(--danger)" style={{ flexShrink: 0 }} />}
             </div>
-          ) : (
-            <div className="task-meta" style={{ color: 'var(--danger)', fontWeight: 500 }}>
-              <AlertCircle size={12} style={{ flexShrink: 0 }} /> {widthPercent < 50 ? 'Un...' : 'Unassigned'}
-            </div>
-          )}
+          ) : null}
           {scheduledTask.notes && height >= 58 && (
             <div className="task-meta task-notes-preview">
               <StickyNote size={12} />
