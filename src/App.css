@@ -981,6 +981,10 @@
   cursor: pointer;
 }
 
+.scheduled-task-wrapper:hover {
+  z-index: 100;
+}
+
 .scheduled-task {
   position: absolute;
   left: 4px;
