@@ -53,15 +53,15 @@ const DAILY_DUTY_BLOCKS = [
   {
     idPrefix: 'opening-duties',
     taskId: 'task-opening-duties',
-    startHour: 7,
+    startHour: 8,
     startMinute: 0,
     notes: 'Sinks, tables, sanitizer bottles, dry dishes, clean cloths, high-touch surfaces, carts.',
   },
   {
     idPrefix: 'closing-duties',
     taskId: 'task-closing-duties',
-    startHour: 16,
-    startMinute: 15,
+    startHour: 15,
+    startMinute: 45,
     notes: 'Post-op cleaning plus garbage, recycling, cardboard, organics, and general waste.',
   },
 ];
@@ -185,6 +185,31 @@ function createDailyDutyTask(dayId, duty) {
     buckets: 1,
     notes: duty.notes,
     isAutomaticDaily: true,
+  };
+}
+
+function normalizeDailyDutyTask(task) {
+  if (!task?.isAutomaticDaily) return task;
+  const duty = DAILY_DUTY_BLOCKS.find(item => item.taskId === task.templateId);
+  const template = taskTemplates.find(item => item.id === task.templateId);
+  if (!duty || !template) return task;
+
+  const duration = getTaskDuration(template, 1);
+  if (
+    task.startHour === duty.startHour
+    && task.startMinute === duty.startMinute
+    && task.duration === duration
+    && task.notes === duty.notes
+  ) {
+    return task;
+  }
+
+  return {
+    ...task,
+    startHour: duty.startHour,
+    startMinute: duty.startMinute,
+    duration,
+    notes: duty.notes,
   };
 }
 
@@ -1940,7 +1965,9 @@ export default function App() {
       const saved = data?.state || {};
       if (Array.isArray(saved.employees)) setEmployees(saved.employees);
       if (Array.isArray(saved.activeRuns)) setActiveRuns(saved.activeRuns);
-      if (Array.isArray(saved.scheduledTasks)) setScheduledTasks(saved.scheduledTasks);
+      if (Array.isArray(saved.scheduledTasks)) {
+        setScheduledTasks(saved.scheduledTasks.map(normalizeDailyDutyTask));
+      }
       if (saved.runSetups) setRunSetups(saved.runSetups);
       if (saved.processSetups) setProcessSetups(saved.processSetups);
       if (saved.employeeAvailability) setEmployeeAvailability(saved.employeeAvailability);
@@ -2015,14 +2042,17 @@ export default function App() {
     // Keep the generated daily-duty blocks aligned with the visible week.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setScheduledTasks(prev => {
-      const existingIds = new Set(prev.map(task => task.id));
+      const normalizedTasks = prev.map(normalizeDailyDutyTask);
+      const existingIds = new Set(normalizedTasks.map(task => task.id));
       const missingDailyTasks = weekDays.flatMap(day => (
         DAILY_DUTY_BLOCKS
           .map(duty => createDailyDutyTask(day.id, duty))
           .filter(task => task && !existingIds.has(task.id))
       ));
 
-      return missingDailyTasks.length > 0 ? [...prev, ...missingDailyTasks] : prev;
+      const normalizedChanged = normalizedTasks.some((task, index) => task !== prev[index]);
+      if (missingDailyTasks.length > 0) return [...normalizedTasks, ...missingDailyTasks];
+      return normalizedChanged ? normalizedTasks : prev;
     });
   }, [weekDays]);
 
